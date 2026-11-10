@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/wordmark.png" width="340" alt="Cluecose">
+</p>
+
 # Cluecose
 
 Liquid-glass CGM companion that displays your FreeStyle Libre 3 glucose
