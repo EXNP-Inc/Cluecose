@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import ActivityKit
 import CluecoseCore
 
 /// High-level app phase, derived from the reader's state.
@@ -55,6 +56,27 @@ final class GlucoseModel: ObservableObject {
         }
     }
     @Published var healthKitStatus: String = "Health app: not connected"
+    /// Live Activity (Dynamic Island + Lock Screen, mirrored on the watch).
+    @Published var liveActivityEnabled: Bool {
+        didSet {
+            guard liveActivityEnabled != oldValue else { return }
+            UserDefaults.standard.set(liveActivityEnabled, forKey: LiveActivityManager.enabledKey)
+            if liveActivityEnabled {
+                Task { [weak self] in
+                    guard let self else { return }
+                    if let latest = self.latest, self.isFresh {
+                        await LiveActivityManager.shared.sync(
+                            mgdl: latest.mgdl, date: latest.date,
+                            trendWire: self.trend.wireValue, unitWire: self.unit.rawValue,
+                            isFresh: true
+                        )
+                    }
+                }
+            } else {
+                Task { await LiveActivityManager.shared.end() }
+            }
+        }
+    }
 
     // MARK: Sensor / link state
 
@@ -90,6 +112,7 @@ final class GlucoseModel: ObservableObject {
         }
         libreViewAccountID = UserDefaults.standard.string(forKey: Self.accountIDKey) ?? ""
         healthKitEnabled = UserDefaults.standard.object(forKey: HealthKitSync.enabledKey) as? Bool ?? true
+        liveActivityEnabled = UserDefaults.standard.bool(forKey: LiveActivityManager.enabledKey)
 
         directReader = LibreDirectReader()
         directReader.onStatus = { [weak self] text in
@@ -132,6 +155,19 @@ final class GlucoseModel: ObservableObject {
         refreshDerived()
         startHealthKit()
         WatchPusher.shared.activate()
+        // Restore the Live Activity on launch: the toggle's didSet only fires
+        // on a change, so an app relaunch (or the sensor reconnecting after a
+        // reinstall) needs an explicit sync to bring the activity back.
+        if liveActivityEnabled, let latest = latest, isFresh {
+            Task { [weak self] in
+                guard let self else { return }
+                await LiveActivityManager.shared.sync(
+                    mgdl: latest.mgdl, date: latest.date,
+                    trendWire: self.trend.wireValue, unitWire: self.unit.rawValue,
+                    isFresh: self.isFresh
+                )
+            }
+        }
     }
 
     private func startHealthKit() {
@@ -287,6 +323,19 @@ final class GlucoseModel: ObservableObject {
                 tir: stats.isMeaningful ? stats.tir : nil,
                 burnWire: burnMode.rawValue
             )
+            // Keep the Live Activity (Dynamic Island / Lock Screen / watch)
+            // in step with every fresh reading.
+            if liveActivityEnabled {
+                Task {
+                    await LiveActivityManager.shared.sync(
+                        mgdl: latest.mgdl,
+                        date: latest.date,
+                        trendWire: trend.wireValue,
+                        unitWire: unit.rawValue,
+                        isFresh: isFresh
+                    )
+                }
+            }
         }
     }
 

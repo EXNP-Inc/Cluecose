@@ -33,12 +33,14 @@ targets:
     platform: iOS
     sources:
       - source/Cluecose
+      - source/LiveActivityShared
     dependencies:
       - package: LibreCRKit
         product: LibreCRKit
       - package: CluecoseCore
         product: CluecoseCore
       - target: CluecoseWatch
+      - target: CluecoseLiveActivity
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.dsikic.cluecose
@@ -50,6 +52,30 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
+
+  # Live Activity extension: renders the glucose Dynamic Island + Lock Screen
+  # activity. The phone app owns the activities (ActivityKit); the paired
+  # Apple Watch inherits them automatically.
+  CluecoseLiveActivity:
+    type: app-extension
+    platform: iOS
+    sources:
+      - source/CluecoseLiveActivity
+      - source/LiveActivityShared
+    dependencies:
+      - package: CluecoseCore
+        product: CluecoseCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dsikic.cluecose.activity
+        PRODUCT_NAME: CluecoseLiveActivity
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_FILE: source/CluecoseLiveActivity/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SKIP_INSTALL: YES
 
   # Apple Watch companion. Xcode 27 deprecates the separate WatchKit extension:
   # a single-target watchOS app is a plain application target on watchOS
@@ -82,6 +108,7 @@ schemes:
     build:
       targets:
         Cluecose: all
+        CluecoseLiveActivity: all
     run:
       config: Debug
   CluecoseWatch:

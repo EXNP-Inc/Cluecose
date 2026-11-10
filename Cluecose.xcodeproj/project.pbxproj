@@ -7,27 +7,42 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		03CA1E9046693E7A90029A4C /* CluecoseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 35AB440722C80622CEED680A /* CluecoseCore */; };
 		0AF59C475BB4D512260EFB8F /* LibreDirectReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B08618405AAB2753F8DD671D /* LibreDirectReader.swift */; };
 		13DA6BDA5ADFC884DDE18A57 /* HealthKitSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D84E1741E260B47B7A64CA /* HealthKitSync.swift */; };
 		1615A5C975C851EDCF1F1FD8 /* CluecoseWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = D35DC6762C635BB7449FA41D /* CluecoseWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		197C0C686253C220A94C17D9 /* GlucoseViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBFE12877EEA6393ADAC0116 /* GlucoseViews.swift */; };
 		322FAC69FFA70F8C43035B88 /* CluecoseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 855AABE40714994CFECFCC4F /* CluecoseCore */; };
+		424687533307E1FC31805F23 /* CluecoseLiveActivityApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6162FACBECE72ECFC54C1421 /* CluecoseLiveActivityApp.swift */; };
 		4F24354F5ACDD60409B8AED5 /* WatchPusher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81DA60BF7D969B7E8882BED6 /* WatchPusher.swift */; };
+		59484B3CD9BA148792B15F99 /* CluecoseGlucoseAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 241FAD24336A5BC500F3B5E9 /* CluecoseGlucoseAttributes.swift */; };
+		5D7C635F6C87F9AD228370B9 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DA07F61C659245BF397A07E9 /* Assets.xcassets */; };
 		5E41A6E5953BF185CA95B708 /* LibreCRKit in Frameworks */ = {isa = PBXBuildFile; productRef = 3D8A08685F66D2FC00C5F846 /* LibreCRKit */; };
 		61AA007A97406DD032DDD254 /* CluecoseCore in Frameworks */ = {isa = PBXBuildFile; productRef = BA7C75EE40EF01B1B696B08B /* CluecoseCore */; };
 		695F6ACAA64122108B8D33AD /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B02DDCCD02360299425C1A1C /* AnalyticsView.swift */; };
 		71B1ED606890637550F25881 /* WatchReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2320D5F796DAAA78175DD689 /* WatchReceiver.swift */; };
 		7588027009566DF4DD046CEC /* CluecoseTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3048089BA4A05883A5A97D5 /* CluecoseTheme.swift */; };
 		7B128E2A51D0AFCCB77E9CB1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4C41B6BDABE93AAE27D8B1F7 /* Assets.xcassets */; };
+		7CFF23F83B4B60138D119695 /* LiveActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA1E052EA4C25DF91923DA8 /* LiveActivityManager.swift */; };
 		7D2227D7319FF94B9AFBA010 /* CluecoseApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9BEB6EAF42221D45EDBDB76 /* CluecoseApp.swift */; };
 		937D52F0830B56A9DF7975DF /* CluecoseWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5007C4CBB944FEADA9D5FDEE /* CluecoseWatchApp.swift */; };
+		961B31122D39F1400CF518DE /* CluecoseLiveActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 94F61C085D5C95FB156D5E38 /* CluecoseLiveActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A61BC9CF26D600FEC0D7AECD /* WatchGlucoseModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C98BD33AFCED1A8D5079474 /* WatchGlucoseModel.swift */; };
 		A88C69ADBE969E442E84E6FC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 92150EF193F85B429ED12470 /* Assets.xcassets */; };
 		DD0E271DC52C4C11EC5C835B /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3BF1239158269AED92F6EAC /* ContentView.swift */; };
 		DDE2897FA15BF4787CDB8886 /* GlucoseModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14A8FC2FF578D2EE2298384A /* GlucoseModel.swift */; };
+		E4E44AC11696D65B1A419DDB /* CluecoseGlucoseAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 241FAD24336A5BC500F3B5E9 /* CluecoseGlucoseAttributes.swift */; };
 		F29072965553074E03B7EF20 /* WatchHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C8B11035C88AEE55D612FF7 /* WatchHomeView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		14769990D5619CEAF73EE602 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 6AC885B8CF4328D1817E391C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 462FEFD14AE089229BA3AD97;
+			remoteInfo = CluecoseLiveActivity;
+		};
 		18092149DF39C45A6CE7A32C /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 6AC885B8CF4328D1817E391C /* Project object */;
@@ -49,19 +64,34 @@
 			name = "Embed Watch Content";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		850A556935FFF64782E3ECF2 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				961B31122D39F1400CF518DE /* CluecoseLiveActivity.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		14A8FC2FF578D2EE2298384A /* GlucoseModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlucoseModel.swift; sourceTree = "<group>"; };
 		2320D5F796DAAA78175DD689 /* WatchReceiver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchReceiver.swift; sourceTree = "<group>"; };
+		241FAD24336A5BC500F3B5E9 /* CluecoseGlucoseAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CluecoseGlucoseAttributes.swift; sourceTree = "<group>"; };
+		3686DFA61C8441C21814B69D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		3C8B11035C88AEE55D612FF7 /* WatchHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchHomeView.swift; sourceTree = "<group>"; };
 		431135032F3A4871572003B6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		4C41B6BDABE93AAE27D8B1F7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		5007C4CBB944FEADA9D5FDEE /* CluecoseWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CluecoseWatchApp.swift; sourceTree = "<group>"; };
+		6162FACBECE72ECFC54C1421 /* CluecoseLiveActivityApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CluecoseLiveActivityApp.swift; sourceTree = "<group>"; };
 		81DA60BF7D969B7E8882BED6 /* WatchPusher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchPusher.swift; sourceTree = "<group>"; };
 		8C8DBAFE4AE04512C99EF491 /* Cluecose.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Cluecose.entitlements; sourceTree = "<group>"; };
 		8C98BD33AFCED1A8D5079474 /* WatchGlucoseModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchGlucoseModel.swift; sourceTree = "<group>"; };
 		92150EF193F85B429ED12470 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		94F61C085D5C95FB156D5E38 /* CluecoseLiveActivity.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = CluecoseLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A3BF1239158269AED92F6EAC /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A6135F46B1599F021CB5C98A /* Cluecose.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Cluecose.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B02DDCCD02360299425C1A1C /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
@@ -72,7 +102,10 @@
 		C9BEB6EAF42221D45EDBDB76 /* CluecoseApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CluecoseApp.swift; sourceTree = "<group>"; };
 		C9D84E1741E260B47B7A64CA /* HealthKitSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitSync.swift; sourceTree = "<group>"; };
 		D35DC6762C635BB7449FA41D /* CluecoseWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CluecoseWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		DA07F61C659245BF397A07E9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		EBFE12877EEA6393ADAC0116 /* GlucoseViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlucoseViews.swift; sourceTree = "<group>"; };
 		ECCC560CEFAA75BA52F3A6D9 /* CluecoseWatchExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CluecoseWatchExtension.entitlements; sourceTree = "<group>"; };
+		FAA1E052EA4C25DF91923DA8 /* LiveActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -93,6 +126,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		EA18AC7DE751288C93A253CD /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				03CA1E9046693E7A90029A4C /* CluecoseCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -104,6 +145,14 @@
 			path = Analytics;
 			sourceTree = "<group>";
 		};
+		2E1A448090C3C19E448F1E55 /* LiveActivityShared */ = {
+			isa = PBXGroup;
+			children = (
+				241FAD24336A5BC500F3B5E9 /* CluecoseGlucoseAttributes.swift */,
+			);
+			path = LiveActivityShared;
+			sourceTree = "<group>";
+		};
 		324A0AA6EABF974BAAE5594A /* HealthKit */ = {
 			isa = PBXGroup;
 			children = (
@@ -112,12 +161,22 @@
 			path = HealthKit;
 			sourceTree = "<group>";
 		};
+		4CF2E06FB35DA7AD4BD3BFC1 /* LiveActivity */ = {
+			isa = PBXGroup;
+			children = (
+				FAA1E052EA4C25DF91923DA8 /* LiveActivityManager.swift */,
+			);
+			path = LiveActivity;
+			sourceTree = "<group>";
+		};
 		99D6238A609F5B87F86DDCAB /* source */ = {
 			isa = PBXGroup;
 			children = (
 				C1DA7BC4772D3DFC953752C6 /* Cluecose */,
+				BCEE62E21F9F8297B49FA6EC /* CluecoseLiveActivity */,
 				D51F9197F10EC2441DBE49E8 /* CluecoseWatch */,
 				E104AACEFAAC2472386E0CB9 /* CluecoseWatchExtension */,
+				2E1A448090C3C19E448F1E55 /* LiveActivityShared */,
 			);
 			path = source;
 			sourceTree = "<group>";
@@ -126,6 +185,7 @@
 			isa = PBXGroup;
 			children = (
 				A6135F46B1599F021CB5C98A /* Cluecose.app */,
+				94F61C085D5C95FB156D5E38 /* CluecoseLiveActivity.appex */,
 				D35DC6762C635BB7449FA41D /* CluecoseWatch.app */,
 			);
 			name = Products;
@@ -138,6 +198,17 @@
 				99D6238A609F5B87F86DDCAB /* source */,
 				9F995310E1BA0C9BEF8B2C21 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		BCEE62E21F9F8297B49FA6EC /* CluecoseLiveActivity */ = {
+			isa = PBXGroup;
+			children = (
+				DA07F61C659245BF397A07E9 /* Assets.xcassets */,
+				6162FACBECE72ECFC54C1421 /* CluecoseLiveActivityApp.swift */,
+				EBFE12877EEA6393ADAC0116 /* GlucoseViews.swift */,
+				3686DFA61C8441C21814B69D /* Info.plist */,
+			);
+			path = CluecoseLiveActivity;
 			sourceTree = "<group>";
 		};
 		C1DA7BC4772D3DFC953752C6 /* Cluecose */ = {
@@ -154,6 +225,7 @@
 				166604B2AFD6371F27FFD209 /* Analytics */,
 				324A0AA6EABF974BAAE5594A /* HealthKit */,
 				D92BB5E6D43D0DACB094E345 /* Libre */,
+				4CF2E06FB35DA7AD4BD3BFC1 /* LiveActivity */,
 			);
 			path = Cluecose;
 			sourceTree = "<group>";
@@ -205,12 +277,14 @@
 				B7F5026FB73561F23DF092BC /* Sources */,
 				B1AC1884FAE0EBC49A7D4CEA /* Resources */,
 				C9887C567E02FBE7F192F15D /* Frameworks */,
+				850A556935FFF64782E3ECF2 /* Embed Foundation Extensions */,
 				27669BC4AC05CF4F7F78A9D0 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				E1D5C2FF43F58C3A0DB875FF /* PBXTargetDependency */,
+				723A31493014424F168A9532 /* PBXTargetDependency */,
 			);
 			name = Cluecose;
 			packageProductDependencies = (
@@ -220,6 +294,26 @@
 			productName = Cluecose;
 			productReference = A6135F46B1599F021CB5C98A /* Cluecose.app */;
 			productType = "com.apple.product-type.application";
+		};
+		462FEFD14AE089229BA3AD97 /* CluecoseLiveActivity */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 942314823E1F295AE92DF0EB /* Build configuration list for PBXNativeTarget "CluecoseLiveActivity" */;
+			buildPhases = (
+				000A10A65406E998ACA10416 /* Sources */,
+				365FC0C332177D79C4680503 /* Resources */,
+				EA18AC7DE751288C93A253CD /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CluecoseLiveActivity;
+			packageProductDependencies = (
+				35AB440722C80622CEED680A /* CluecoseCore */,
+			);
+			productName = CluecoseLiveActivity;
+			productReference = 94F61C085D5C95FB156D5E38 /* CluecoseLiveActivity.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 		6844DC65C0A7F2E8FEB888D4 /* CluecoseWatch */ = {
 			isa = PBXNativeTarget;
@@ -254,6 +348,10 @@
 						DevelopmentTeam = Q53D65KB4X;
 						ProvisioningStyle = Automatic;
 					};
+					462FEFD14AE089229BA3AD97 = {
+						DevelopmentTeam = Q53D65KB4X;
+						ProvisioningStyle = Automatic;
+					};
 					6844DC65C0A7F2E8FEB888D4 = {
 						DevelopmentTeam = Q53D65KB4X;
 						ProvisioningStyle = Automatic;
@@ -279,12 +377,21 @@
 			projectRoot = "";
 			targets = (
 				0D0DCC1BDC4AFB2E7A27F6AB /* Cluecose */,
+				462FEFD14AE089229BA3AD97 /* CluecoseLiveActivity */,
 				6844DC65C0A7F2E8FEB888D4 /* CluecoseWatch */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		365FC0C332177D79C4680503 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5D7C635F6C87F9AD228370B9 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B1AC1884FAE0EBC49A7D4CEA /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -304,6 +411,16 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		000A10A65406E998ACA10416 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				59484B3CD9BA148792B15F99 /* CluecoseGlucoseAttributes.swift in Sources */,
+				424687533307E1FC31805F23 /* CluecoseLiveActivityApp.swift in Sources */,
+				197C0C686253C220A94C17D9 /* GlucoseViews.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		9D73C6A9082725A72DAB64DE /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -321,11 +438,13 @@
 			files = (
 				695F6ACAA64122108B8D33AD /* AnalyticsView.swift in Sources */,
 				7D2227D7319FF94B9AFBA010 /* CluecoseApp.swift in Sources */,
+				E4E44AC11696D65B1A419DDB /* CluecoseGlucoseAttributes.swift in Sources */,
 				7588027009566DF4DD046CEC /* CluecoseTheme.swift in Sources */,
 				DD0E271DC52C4C11EC5C835B /* ContentView.swift in Sources */,
 				DDE2897FA15BF4787CDB8886 /* GlucoseModel.swift in Sources */,
 				13DA6BDA5ADFC884DDE18A57 /* HealthKitSync.swift in Sources */,
 				0AF59C475BB4D512260EFB8F /* LibreDirectReader.swift in Sources */,
+				7CFF23F83B4B60138D119695 /* LiveActivityManager.swift in Sources */,
 				4F24354F5ACDD60409B8AED5 /* WatchPusher.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -333,6 +452,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		723A31493014424F168A9532 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 462FEFD14AE089229BA3AD97 /* CluecoseLiveActivity */;
+			targetProxy = 14769990D5619CEAF73EE602 /* PBXContainerItemProxy */;
+		};
 		E1D5C2FF43F58C3A0DB875FF /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 6844DC65C0A7F2E8FEB888D4 /* CluecoseWatch */;
@@ -403,6 +527,27 @@
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
+		147A7B8728241A2DD58DE60D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = source/CluecoseLiveActivity/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dsikic.cluecose.activity;
+				PRODUCT_NAME = CluecoseLiveActivity;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
@@ -503,6 +648,27 @@
 			};
 			name = Release;
 		};
+		EA55691BF0269FD48B3EE78B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = source/CluecoseLiveActivity/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dsikic.cluecose.activity;
+				PRODUCT_NAME = CluecoseLiveActivity;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 		EC73838D9CD9B2D6F98C07E8 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -554,6 +720,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
+		942314823E1F295AE92DF0EB /* Build configuration list for PBXNativeTarget "CluecoseLiveActivity" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				147A7B8728241A2DD58DE60D /* Debug */,
+				EA55691BF0269FD48B3EE78B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		9A74AF372A3056D69E034540 /* Build configuration list for PBXNativeTarget "CluecoseWatch" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -593,6 +768,10 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		35AB440722C80622CEED680A /* CluecoseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CluecoseCore;
+		};
 		3D8A08685F66D2FC00C5F846 /* LibreCRKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 9E2F0E9A20E84BD93CB082A2 /* XCRemoteSwiftPackageReference "LibreCRKit" */;

@@ -583,6 +583,19 @@ struct SettingsSheet: View {
                         LabeledContent("Health app", value: "unavailable")
                     }
                 }
+
+                Section("Display") {
+                    Toggle(isOn: $model.liveActivityEnabled) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Live Activity")
+                            Text(model.liveActivityEnabled
+                                 ? "Glucose on the Dynamic Island, Lock Screen and Apple Watch"
+                                 : "Off")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)

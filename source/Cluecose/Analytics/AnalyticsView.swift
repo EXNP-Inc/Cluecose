@@ -56,7 +56,11 @@ struct BurnModeCard: View {
                                        startPoint: .top, endPoint: .bottom)
                     )
                     .shadow(color: tint.opacity(0.5), radius: 18)
-                Spacer()
+                    // Never wrap on narrow layouts (iPhone Duo's outer screen):
+                    // shrink to fit on one line instead of breaking mid-word.
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                Spacer(minLength: 8)
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("AUC > 140")
                         .font(.caption2)
@@ -69,7 +73,9 @@ struct BurnModeCard: View {
                         .font(.caption2)
                         .foregroundStyle(.white.opacity(0.35))
                 }
+                .fixedSize(horizontal: false, vertical: true)
             }
+            .layoutPriority(1)
 
             Text(subtitle)
                 .font(.footnote)

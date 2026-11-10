@@ -21,6 +21,20 @@
                ReferencedContainer = "container:Cluecose.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "462FEFD14AE089229BA3AD97"
+               BuildableName = "CluecoseLiveActivity.appex"
+               BlueprintName = "CluecoseLiveActivity"
+               ReferencedContainer = "container:Cluecose.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
