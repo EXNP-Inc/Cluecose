@@ -30,6 +30,7 @@ struct WatchHomeView: View {
             .ignoresSafeArea()
 
             VStack(spacing: 10) {
+                brandRow
                 if let latest = model.latest {
                     hero(latest)
                     metricsRow
@@ -43,6 +44,19 @@ struct WatchHomeView: View {
                     .lineLimit(2)
             }
             .padding(.horizontal, 12)
+        }
+    }
+
+    private var brandRow: some View {
+        HStack(spacing: 5) {
+            Image("Logo")
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .frame(width: 15, height: 15)
+            Text("Cluecose")
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.7))
         }
     }
 

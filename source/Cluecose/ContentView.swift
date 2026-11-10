@@ -55,16 +55,11 @@ struct ContentView: View {
     private var header: some View {
         HStack {
             HStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .fill(LinearGradient(colors: [Color(red: 0.35, green: 0.95, blue: 0.65),
-                                                      Color(red: 0.15, green: 0.6, blue: 0.9)],
-                                             startPoint: .top, endPoint: .bottom))
-                        .frame(width: 38, height: 38)
-                    Image(systemName: "drop.halffull")
-                        .font(.system(size: 19, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
+                Image("Logo")
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(width: 38, height: 38)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Cluecose")
                         .font(.system(size: 20, weight: .bold, design: .rounded))
