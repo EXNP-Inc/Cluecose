@@ -26,6 +26,17 @@ encrypted Libre 3 data plane over CoreBluetooth and decrypts it on-device:
    locally, so relaunching (and auto-reconnect after a dropped link)
    re-authorizes without another NFC tap.
 
+### Background behavior (stays connected, heals on its own)
+
+The app runs with the `bluetooth-central` background mode and **does not tear
+the link down when the phone locks**. If the link drops while backgrounded,
+iOS wakes the app when the sensor is observed again (CoreBluetooth connection
+events, restoration id `com.dsikic.cluecose.central`) and Cluecose jumps
+straight to the cached handshake; otherwise its reconnect loop ramps
+2 → 4 → 8 → 16 s and then retries every 30 s, forever, until the link is
+back. Opening the app after a lock therefore shows a live reading instead of
+a cold ~75 s scan.
+
 The pairing + crypto stack is **LibreCRKit** (MIT, clean-room; fork of
 `airedev326/LibreCRKit` now at
 [pov-it/LibreCRKit](https://github.com/pov-it/LibreCRKit), branch `trio`).
