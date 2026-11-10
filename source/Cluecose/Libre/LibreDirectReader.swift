@@ -164,8 +164,10 @@ final class LibreDirectReader {
     private var assembler: DataPlaneNotificationAssembler?
     private var listenerTask: Task<Void, Never>?
     private var backfillTask: Task<Void, Never>?
+    private var connectionWatcherTask: Task<Void, Never>?
     private var reconnectAttempt = 0
     private var linkActive = false
+    private var isReconnecting = false
     private var cancelled = false
 
     /// lifeCount -> (mg/dL, date). Life count is unique per sensor, so realtime,
@@ -195,6 +197,27 @@ final class LibreDirectReader {
                 }
             }
         }
+        // Background-mode connection events: with `bluetooth-central` in
+        // UIBackgroundModes, iOS wakes the app when the sensor is seen again
+        // after a drop (CBConnectionEvent .connected / .notFound). Consuming
+        // this stream makes the reconnect immediate instead of waiting for
+        // the next scheduled scan.
+        scanner.registerForConnectionEvents()
+        connectionWatcherTask = Task { [weak self] in
+            guard let self else { return }
+            for await event in self.scanner.connectionEvents() {
+                // Only a `.peerConnected` observation means the sensor is
+                // reachable right now → jump straight to the (cached) reconnect
+                // instead of waiting for the next scheduled scan.
+                // `.peerDisconnected` is left to the backoff loop so a storm of
+                // "still not there" events can't bypass it.
+                guard case .peerConnected = event.event else { continue }
+                guard !self.cancelled, !self.linkActive, !self.isReconnecting,
+                      self.listenerTask == nil, self.backfillTask == nil else { continue }
+                clog("BLE sensor re-observed — jumping to cached reconnect (peripheral=\(event.peripheral.name ?? "nil"))")
+                self.reconnect()
+            }
+        }
     }
 
     /// Start listening. Call once from the app's `.task` (and on foreground).
@@ -208,6 +231,8 @@ final class LibreDirectReader {
 
     func stop() {
         cancelled = true
+        connectionWatcherTask?.cancel()
+        connectionWatcherTask = nil
         teardownSession()
     }
 
@@ -293,9 +318,11 @@ final class LibreDirectReader {
     func reconnect() {
         guard let saved = state else { return }
         cancelled = false
-        if linkActive { return }
+        if linkActive || isReconnecting { return }
+        isReconnecting = true
         Task { [weak self] in
             guard let self else { return }
+            defer { self.isReconnecting = false }
             do {
                 try await self.connectAndAuthorize(
                     blePIN: saved.blePIN,
@@ -603,12 +630,26 @@ final class LibreDirectReader {
         guard !cancelled, hasSavedState else { return }
         guard listenerTask == nil, backfillTask == nil else { return }
         reconnectAttempt += 1
-        guard reconnectAttempt <= 8 else {
-            status("Couldn't reach the sensor — tap it again when convenient.")
-            return
+        // Persistent: a paired sensor should be re-acquired on its own. The
+        // app runs with the bluetooth-central background mode, so this loop
+        // keeps healing the link while the phone is locked too. Cadence:
+        // quick for the first few tries (typical app-suspension drops), then
+        // a steady 30 s — the sensor only answers when its connection window
+        // is open, so a scan can miss one round and hit the next.
+        let delay: TimeInterval
+        switch reconnectAttempt {
+        case 1: delay = 2
+        case 2: delay = 4
+        case 3: delay = 8
+        case 4: delay = 16
+        default: delay = 30
         }
-        let delay = min(30.0, 2.0 * Double(reconnectAttempt))
-        status("Link lost — reconnecting in \(Int(delay)) s…")
+        if reconnectAttempt <= 4 {
+            status("Link lost — reconnecting in \(Int(delay)) s…")
+        } else if reconnectAttempt == 5 {
+            status("Still searching for the sensor — trying every 30 s…")
+        }
+        clog("scheduleReconnect #\(reconnectAttempt) in \(Int(delay)) s")
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard let self, !self.cancelled, !self.linkActive else { return }

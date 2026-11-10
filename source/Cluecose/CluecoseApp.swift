@@ -15,13 +15,18 @@ struct CluecoseApp: App {
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
             case .active:
-                // Resume the BLE listener on foreground (start() is idempotent).
+                // Re-assert on foreground (idempotent: the reader no-ops if the
+                // link is already live). This is also the fast path after the
+                // app was suspended — the background loop will usually already
+                // have the link up, so this is a no-op.
                 model.start()
-            case .background:
-                // Keep the Bluetooth-central link alive in the background;
-                // the reader reconnects on its own schedule.
-                model.stop()
             default:
+                // .background / .inactive: do NOT tear the link down. We run
+                // with the `bluetooth-central` background mode, so the reader
+                // keeps the connection (or its own reconnect loop) alive while
+                // the app is backgrounded. Tearing it down on lock — the old
+                // behaviour — forced a cold ~75 s scan + handshake on every
+                // unlock, which is exactly the "takes so long to reconnect".
                 break
             }
         }
