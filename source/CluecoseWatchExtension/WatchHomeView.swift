@@ -51,14 +51,17 @@ struct WatchHomeView: View {
             Image(systemName: model.trend.symbol)
                 .font(.system(size: 18, weight: .bold))
                 .foregroundStyle(tint)
-            Text(String(format: "%.0f", latest.mgdl))
+            // Tap the number to cycle mg/dL <-> mmol/L.
+            Text(model.unit.format(fromMgdl: latest.mgdl))
                 .font(.system(size: 52, weight: .heavy, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(.white)
                 .shadow(color: tint.opacity(0.6), radius: 10)
+                .contentShape(Rectangle())
+                .onTapGesture { withAnimation(.snappy) { model.toggleUnit() } }
             Spacer(minLength: 0)
             VStack(alignment: .trailing, spacing: 2) {
-                Text("mg/dL")
+                Text(model.unit.rawValue)
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.5))
                 freshnessPill

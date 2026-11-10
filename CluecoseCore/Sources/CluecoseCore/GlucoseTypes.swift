@@ -34,6 +34,29 @@ public enum GlucoseUnit: String, CaseIterable, Sendable {
 public enum Trend: Equatable, Sendable {
     case sharpRise, rise, flat, fall, sharpFall, unknown
 
+    /// Stable string form for cross-process transfer (phone → watch).
+    public var wireValue: String {
+        switch self {
+        case .sharpRise: "sharpRise"
+        case .rise: "rise"
+        case .flat: "flat"
+        case .fall: "fall"
+        case .sharpFall: "sharpFall"
+        case .unknown: "unknown"
+        }
+    }
+
+    public init(wireValue: String) {
+        switch wireValue {
+        case "sharpRise": self = .sharpRise
+        case "rise": self = .rise
+        case "flat": self = .flat
+        case "fall": self = .fall
+        case "sharpFall": self = .sharpFall
+        default: self = .unknown
+        }
+    }
+
     public var symbol: String {
         switch self {
         case .sharpRise: "arrow.up"

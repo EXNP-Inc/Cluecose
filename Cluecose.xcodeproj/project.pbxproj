@@ -11,9 +11,11 @@
 		13DA6BDA5ADFC884DDE18A57 /* HealthKitSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D84E1741E260B47B7A64CA /* HealthKitSync.swift */; };
 		1615A5C975C851EDCF1F1FD8 /* CluecoseWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = D35DC6762C635BB7449FA41D /* CluecoseWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		322FAC69FFA70F8C43035B88 /* CluecoseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 855AABE40714994CFECFCC4F /* CluecoseCore */; };
+		4F24354F5ACDD60409B8AED5 /* WatchPusher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81DA60BF7D969B7E8882BED6 /* WatchPusher.swift */; };
 		5E41A6E5953BF185CA95B708 /* LibreCRKit in Frameworks */ = {isa = PBXBuildFile; productRef = 3D8A08685F66D2FC00C5F846 /* LibreCRKit */; };
 		61AA007A97406DD032DDD254 /* CluecoseCore in Frameworks */ = {isa = PBXBuildFile; productRef = BA7C75EE40EF01B1B696B08B /* CluecoseCore */; };
 		695F6ACAA64122108B8D33AD /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B02DDCCD02360299425C1A1C /* AnalyticsView.swift */; };
+		71B1ED606890637550F25881 /* WatchReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2320D5F796DAAA78175DD689 /* WatchReceiver.swift */; };
 		7588027009566DF4DD046CEC /* CluecoseTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3048089BA4A05883A5A97D5 /* CluecoseTheme.swift */; };
 		7B128E2A51D0AFCCB77E9CB1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4C41B6BDABE93AAE27D8B1F7 /* Assets.xcassets */; };
 		7D2227D7319FF94B9AFBA010 /* CluecoseApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9BEB6EAF42221D45EDBDB76 /* CluecoseApp.swift */; };
@@ -51,10 +53,12 @@
 
 /* Begin PBXFileReference section */
 		14A8FC2FF578D2EE2298384A /* GlucoseModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlucoseModel.swift; sourceTree = "<group>"; };
+		2320D5F796DAAA78175DD689 /* WatchReceiver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchReceiver.swift; sourceTree = "<group>"; };
 		3C8B11035C88AEE55D612FF7 /* WatchHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchHomeView.swift; sourceTree = "<group>"; };
 		431135032F3A4871572003B6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		4C41B6BDABE93AAE27D8B1F7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		5007C4CBB944FEADA9D5FDEE /* CluecoseWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CluecoseWatchApp.swift; sourceTree = "<group>"; };
+		81DA60BF7D969B7E8882BED6 /* WatchPusher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchPusher.swift; sourceTree = "<group>"; };
 		8C8DBAFE4AE04512C99EF491 /* Cluecose.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Cluecose.entitlements; sourceTree = "<group>"; };
 		8C98BD33AFCED1A8D5079474 /* WatchGlucoseModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchGlucoseModel.swift; sourceTree = "<group>"; };
 		92150EF193F85B429ED12470 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -146,6 +150,7 @@
 				A3BF1239158269AED92F6EAC /* ContentView.swift */,
 				14A8FC2FF578D2EE2298384A /* GlucoseModel.swift */,
 				431135032F3A4871572003B6 /* Info.plist */,
+				81DA60BF7D969B7E8882BED6 /* WatchPusher.swift */,
 				166604B2AFD6371F27FFD209 /* Analytics */,
 				324A0AA6EABF974BAAE5594A /* HealthKit */,
 				D92BB5E6D43D0DACB094E345 /* Libre */,
@@ -185,6 +190,7 @@
 				ECCC560CEFAA75BA52F3A6D9 /* CluecoseWatchExtension.entitlements */,
 				8C98BD33AFCED1A8D5079474 /* WatchGlucoseModel.swift */,
 				3C8B11035C88AEE55D612FF7 /* WatchHomeView.swift */,
+				2320D5F796DAAA78175DD689 /* WatchReceiver.swift */,
 			);
 			path = CluecoseWatchExtension;
 			sourceTree = "<group>";
@@ -305,6 +311,7 @@
 				937D52F0830B56A9DF7975DF /* CluecoseWatchApp.swift in Sources */,
 				A61BC9CF26D600FEC0D7AECD /* WatchGlucoseModel.swift in Sources */,
 				F29072965553074E03B7EF20 /* WatchHomeView.swift in Sources */,
+				71B1ED606890637550F25881 /* WatchReceiver.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -319,6 +326,7 @@
 				DDE2897FA15BF4787CDB8886 /* GlucoseModel.swift in Sources */,
 				13DA6BDA5ADFC884DDE18A57 /* HealthKitSync.swift in Sources */,
 				0AF59C475BB4D512260EFB8F /* LibreDirectReader.swift in Sources */,
+				4F24354F5ACDD60409B8AED5 /* WatchPusher.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -131,6 +131,7 @@ final class GlucoseModel: ObservableObject {
         directReader.start()
         refreshDerived()
         startHealthKit()
+        WatchPusher.shared.activate()
     }
 
     private func startHealthKit() {
@@ -274,6 +275,18 @@ final class GlucoseModel: ObservableObject {
         tips = GlucoseAnalytics.tips(stats: stats, latest: merged.last, trend: trend)
         if healthKitEnabled {
             Task { await healthKit.write(samples) }
+        }
+        // Push the live reading to the watch (WatchConnectivity). The watch's
+        // HealthKit replica lags, so the phone is the real-time source.
+        if let latest = merged.last {
+            WatchPusher.shared.push(
+                mgdl: latest.mgdl,
+                date: latest.date,
+                trendWire: trend.wireValue,
+                unitWire: unit.rawValue,
+                tir: stats.isMeaningful ? stats.tir : nil,
+                burnWire: burnMode.rawValue
+            )
         }
     }
 
