@@ -53,14 +53,20 @@ activation with a **different** ID using NFC error `0xB1`. Cluecose handles
 this with a small candidate ladder:
 
 - **Fresh / Cluecose-activated sensor** — accepts Cluecose's own stable
-  accountless receiver ID (a per-install value, no Abbott material). This is
-  the default and needs nothing from you.
-- **Sensor already bound to the Libre / FreeStyle Libre app** — the app
+  accountless receiver ID (a per-install value, no vendor material). This is
+  the default and needs nothing from you; the pairing screen is just "hold
+  the phone to the sensor".
+- **Sensor already bound to the Libre / FreeStyle Libre app** — that app
   derived the stored ID from your **LibreView Account ID** (the account
-  *UUID*, not your login). If Cluecose's accountless ID is rejected with
-  `0xB1`, the app asks you to paste that UUID once. Cluecose folds it exactly
-  the way the Abbott apps do (two documented derivations) and retries. The
-  UUID is stored only on this phone and is **never transmitted anywhere**.
+  *UUID*, not your login). Only if Cluecose's ID is rejected with `0xB1`
+  does the app reveal a single text field and ask you to paste that UUID
+  once. Cluecose folds it exactly the way the vendor apps do (two documented
+  derivations) and retries. The UUID is stored only on this phone and is
+  **never transmitted anywhere**.
+
+Cluecose never asks for a login and never contacts any vendor service —
+the account ID is folded locally into a 4-byte receiver ID and only ever
+written to the sensor's NFC tag during pairing.
 
 ### Sensor clock (timeRaw)
 

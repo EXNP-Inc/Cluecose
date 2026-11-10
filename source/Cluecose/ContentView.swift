@@ -134,7 +134,13 @@ struct ContentView: View {
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
 
-            accountIDField
+            // The LibreView Account ID is only relevant when a tap is rejected
+            // because the sensor was activated by the Libre app (NFC 0xB1).
+            // For a Cluecose-activated sensor the pairing flow never needs it,
+            // so the field stays hidden and the screen stays Abbott/LibreView-free.
+            if model.needsReceiverID {
+                accountIDField
+            }
 
             if model.nfcAwaiting {
                 nfcWaitingBanner
@@ -172,7 +178,7 @@ struct ContentView: View {
         if model.needsReceiverID {
             return "To read this sensor Cluecose needs the same account identity the Libre app used. Open the LibreView app (or libreview.com) and copy your Account ID — the UUID in your account page or report link — into the field below. It's just an identifier — it never leaves your phone."
         }
-        return "Hold the top edge of your phone against your sensor for a second. This links Cluecose directly to it over Bluetooth so readings update the moment the sensor broadcasts — no Abbott account, no cloud."
+        return "Hold the top edge of your phone against your sensor for a second. This links Cluecose directly to it over Bluetooth so readings update the moment the sensor broadcasts — no account, no cloud."
     }
 
     private var accountIDField: some View {
@@ -539,7 +545,7 @@ struct ContentView: View {
     }
 
     private var footer: some View {
-        Text("Reads your Libre 3 directly over Bluetooth — no Abbott account, no cloud. Optional Health app sync is on-device only.")
+        Text("Reads your Libre 3 directly over Bluetooth — no account, no cloud. Optional Health app sync is on-device only.")
             .font(.caption2)
             .foregroundStyle(.white.opacity(0.35))
             .multilineTextAlignment(.center)
