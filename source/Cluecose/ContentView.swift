@@ -42,6 +42,13 @@ struct ContentView: View {
                 .padding(.horizontal, 18)
                 .padding(.top, 8)
                 .padding(.bottom, 32)
+                // iPhone Duo unfolded inner display (7.58", ~669 pt wide, iPad-mini
+                // class): cap the content to a readable column and center it over the
+                // full-bleed backdrop so cards don't stretch edge-to-edge. On the
+                // 5.36" cover display and regular iPhones this is a no-op (they're
+                // narrower than the cap).
+                .frame(maxWidth: 560)
+                .frame(maxWidth: .infinity)
             }
         }
         .sheet(isPresented: $showSettings) {
