@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# Derived data / build output
+build/
+*.xcarchive
+
+# XcodeGen's vendored binary + presets (re-fetch with scripts/bootstrap.sh).
+# Kept out of the repo to keep it lean; scripts/bootstrap.sh downloads it.
+tools/xcodegen/
+
+# Per-user Xcode state
+**/xcuserdata/
+CluecoseCore/.swiftpm/

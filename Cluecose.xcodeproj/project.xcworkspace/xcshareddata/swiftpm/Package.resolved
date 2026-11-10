@@ -1,0 +1,15 @@
+{
+  "originHash" : "bd4e290852a92c42ea089f7c6546b37b5f62cfc771179ccfb59f4e92b1fdce6c",
+  "pins" : [
+    {
+      "identity" : "librecrkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/pov-it/LibreCRKit",
+      "state" : {
+        "branch" : "trio",
+        "revision" : "24d5617f703089a36f4261c3ab84f2ac505a8f1a"
+      }
+    }
+  ],
+  "version" : 3
+}
