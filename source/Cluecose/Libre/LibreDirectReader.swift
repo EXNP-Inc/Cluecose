@@ -186,6 +186,12 @@ final class LibreDirectReader {
     private var lastHistoricalPageAt = Date.distantPast
     private var historicalPageCount = 0
 
+    /// Same tracking for the clinical stream (per-minute records that the
+    /// sensor buffers while the host is disconnected and replays on
+    /// re-subscribe — the designed minute-resolution gap-fill).
+    private var lastClinicalRecordAt = Date.distantPast
+    private var clinicalRecordCount = 0
+
     // MARK: Lifecycle
 
     init() {
@@ -440,9 +446,28 @@ final class LibreDirectReader {
         var dataCrypto: DataPlaneCrypto
         var phase5RawKey: Data? = nil
         var phase6NoncePrefix: UInt16? = nil
-        clog("Attempting \(allowCached && newSessionState.phase5RawKey.count == 16 ? "CACHED (0x11)" : "FULL first-pair (03 03)") handshake…")
-        if allowCached,
-           newSessionState.phase5RawKey.count == 16,
+        // ── Handshake choice: cached 0x11 or full 03 03 ─────────────────────
+        // The fast cached path (StartAuthorization 0x11) reuses the saved
+        // Phase-5 key and resumes the realtime stream immediately, but its
+        // data plane is a *continuation* of the sensor's existing session:
+        // encrypted patchControl command writes (the backfill requests) are
+        // rejected with a generic "Unknown ATT error" (0xfd), and the
+        // reference implementation confirms this by never issuing backfill
+        // on 0x11 — its proven reconnect+backfill path is the full 03 03
+        // handshake, where the data plane is freshly initialized.
+        //
+        // So: if the stored data is complete and current (the link just
+        // dropped briefly), take the fast 0x11. If there is a hole the
+        // realtime stream cannot fill — the tail is stale (app suspended
+        // for hours) or there is a multi-hour gap in the last 24 h — run
+        // the full 03 03: the extra handshake time is worth a backfill the
+        // sensor will actually accept.
+        let backfillReason = backfillNeededReason()
+        let useCached = allowCached
+            && newSessionState.phase5RawKey.count == 16
+            && backfillReason == nil
+        clog("Attempting \(useCached ? "CACHED (0x11)" : "FULL first-pair (03 03)") handshake… (backfill needed: \(backfillReason ?? "no"))")
+        if useCached,
            let (fast, fastNoncePrefix) = try? await runCachedReconnect(
                 blePIN: blePIN,
                 session: sensorSession
@@ -466,15 +491,19 @@ final class LibreDirectReader {
         }
 
         status("Authorized — arming the data stream…")
-        // Post-Phase-6 the sensor stays silent until each data-plane CCCD gets
-        // a fresh write; refreshDataPlaneNotifications does the off->on toggle.
-        try await sensorSession.refreshDataPlaneNotifications()
-
         state = newSessionState
         setLink(true)
         startListener(sensorSession)
-        startBackfill(sensorSession, crypto: dataCrypto, phase6NoncePrefix: phase6NoncePrefix)
-        status("Live — readings update about once a minute.")
+        // Post-Phase-6 the sensor stays silent until each data-plane CCCD gets
+        // a fresh write. runBackfill starts with the reference's sequential
+        // re-arm pass (patchControl first, 90 ms settles) — the exact order
+        // the proven bootstrap uses — so realtime arms within ~15 s.
+        startBackfill(
+            sensorSession,
+            crypto: dataCrypto,
+            phase6NoncePrefix: phase6NoncePrefix,
+            backfillNeeded: backfillReason != nil
+        )
     }
 
     /// The proven first-pair/candidate handshake: `03 03` phone cert, native
@@ -543,6 +572,47 @@ final class LibreDirectReader {
     private static func phase6NoncePrefix(fromNonce nonce: Data) -> UInt16? {
         guard nonce.count >= 2 else { return nil }
         return UInt16(nonce[nonce.startIndex]) | (UInt16(nonce[nonce.startIndex + 1]) << 8)
+    }
+
+    /// A human-readable reason the stored data needs a backfill, or nil when
+    /// the data is complete and current (link just dropped briefly — the
+    /// realtime stream catches up on its own). Drives the 0x11-vs-03 03
+    /// handshake choice in `connectAndAuthorize`: a non-nil reason forces the
+    /// full 03 03 handshake because only its freshly initialized data plane
+    /// accepts the patchControl backfill writes (0x11 rejects them with 0xfd).
+    ///
+    /// Two failure shapes: the TAIL is stale (app suspended for hours, so the
+    /// newest stored sample is old) or there is a mid-store HOLE (the realtime
+    /// stream may keep the tail fresh even though a chunk is missing — the
+    /// overnight-suspension case, where the app reconnected once, pulled
+    /// nothing, and then resumed live streaming).
+    private func backfillNeededReason() -> String? {
+        guard let state, let activation = state.activationTimeSeconds else { return "no saved state" }
+        let nowEpoch = Date().timeIntervalSince1970
+        guard let lastLC = state.lastGlucoseLifeCount else { return "no stored samples" }
+        let sampleEpoch = Double(activation) + Double(lastLC) * 60
+        let tailAgeMinutes = max(0, (nowEpoch - sampleEpoch) / 60)
+        if tailAgeMinutes > 90 {
+            return "tail \(Int(tailAgeMinutes)) min old"
+        }
+        // Scan the last 24 h of stored lifeCounts for a gap the realtime
+        // stream cannot fill (anything over 2 h is an outage, not 5-min
+        // paging latency).
+        let floor: UInt16 = lastLC >= 1440 ? lastLC - 1440 : 0
+        var lcs: [UInt16] = []
+        storeLock.lock()
+        for lc in sampleStore.keys where lc >= floor { lcs.append(lc) }
+        storeLock.unlock()
+        guard lcs.count > 1 else { return "no stored samples in window" }
+        lcs.sort()
+        var maxGap: UInt16 = 0
+        for i in 1..<lcs.count where lcs[i] - lcs[i - 1] > maxGap {
+            maxGap = lcs[i] - lcs[i - 1]
+        }
+        if maxGap > 120 {
+            return "\(maxGap)-min hole in last 24 h"
+        }
+        return nil
     }
 
     /// Scan for the sensor. If a target BLE address (from the NFC read) is
@@ -670,7 +740,8 @@ final class LibreDirectReader {
     private func startBackfill(
         _ sensorSession: SensorSession,
         crypto: DataPlaneCrypto,
-        phase6NoncePrefix: UInt16?
+        phase6NoncePrefix: UInt16?,
+        backfillNeeded: Bool
     ) {
         backfillTask?.cancel()
         backfillTask = Task { [weak self, sensorSession] in
@@ -698,7 +769,7 @@ final class LibreDirectReader {
             } else {
                 start = 0
             }
-            await self.runBackfill(via: sensorSession, crypto: crypto, fromLifeCount: start)
+            await self.runBackfill(via: sensorSession, crypto: crypto, fromLifeCount: start, backfillNeeded: backfillNeeded)
             self.backfillTask = nil
         }
     }
@@ -706,58 +777,135 @@ final class LibreDirectReader {
     private func runBackfill(
         via session: SensorSession,
         crypto: DataPlaneCrypto,
-        fromLifeCount lifeCount: UInt16
+        fromLifeCount lifeCount: UInt16,
+        backfillNeeded: Bool
     ) async {
-        status("Filling in the last 24 h of history…")
-        // A 24 h pull is ~288 historical pages (6 samples at 5-min stride
-        // per page). After a long outage the sensor takes several seconds to
-        // start streaming the backlog, and the stream then runs for minutes.
-        // The old 8-second "give up" cut the pull short and left the outage
-        // hole in the chart (only the live stream's first point arrived).
-        let firstActivityTimeout: TimeInterval = 15
-        let quietSeconds: TimeInterval = 5
-        let maxSeconds: TimeInterval = 300
-        do {
-            try await session.setNotify(true, for: LibreSensorGATT.Char.historicData, timeout: 10)
-            try? await Task.sleep(for: .milliseconds(150))
-            var sequence: UInt16 = 0x0001
-            for attempt in 1...3 {
-                let command = PatchControlCommand.historicalBackfillGreaterEqual(lifeCount: lifeCount)
-                let frame = try crypto.encrypt(
-                    plaintext: command.plaintext,
-                    sequence: sequence,
-                    kind: .patchControlWrite
-                )
-                try await session.writeRaw(frame.raw, to: LibreSensorGATT.Char.patchControl, timeout: 10)
-
-                // Wait for the historic stream to finish: a full pull only
-                // ends when the sensor goes quiet AFTER it has streamed
-                // pages, or when the hard cap is hit. Track pages
-                // specifically — the realtime stream keeps the shared
-                // notify pipeline busy and would mask the true end.
-                // No pages within the first-activity window → re-issue the
-                // request (the sensor occasionally ignores a backfill
-                // command issued right after Phase 6).
-                let pagesBefore = historicalPageCount
-                let attemptStart = Date()
-                while true {
-                    let now = Date()
-                    let gotPages = historicalPageCount > pagesBefore
-                    if gotPages,
-                       now.timeIntervalSince(lastHistoricalPageAt) >= quietSeconds { break }
-                    if !gotPages, now.timeIntervalSince(attemptStart) >= firstActivityTimeout { break }
-                    if now.timeIntervalSince(attemptStart) >= maxSeconds { break }
-                    try? await Task.sleep(for: .seconds(0.25))
-                }
-                if historicalPageCount > pagesBefore || attempt == 3 { break }
-                clog("backfill: no history pages within \(Int(firstActivityTimeout))s — re-requesting (\(attempt + 1)/3)")
-                sequence = sequence &+ 1
+        // ── Sequential data-plane re-arm (reference bootstrap order) ───────
+        // Post-Phase-6 the sensor stays silent until each data-plane CCCD
+        // gets a fresh write, and iOS retains a characteristic's CCCD across
+        // a reconnect to the same peripheral — a bare setNotify(true)
+        // short-circuits (no CCCD write) and the sensor stays un-armed.
+        // Mirror the proven bootstrap exactly: SEQUENTIAL off→on per channel,
+        // patchControl first, 90 ms settles. One pass only — the reference
+        // rearms patchControl exactly once, and the encrypted backfill write
+        // below lands only after this whole pass has settled. (Earlier
+        // experiments that re-armed patchControl repeatedly around each
+        // write, or via a parallel task-group refresh, saw the write
+        // rejected with "Unknown ATT error" [0xfd].)
+        let rearmOrder: [(String, CBUUID)] = [
+            ("patchControl", LibreSensorGATT.Char.patchControl),
+            ("eventLog", LibreSensorGATT.Char.eventLog),
+            ("factoryData", LibreSensorGATT.Char.factoryData),
+            ("glucoseData", LibreSensorGATT.Char.glucoseData),
+            ("patchStatus", LibreSensorGATT.Char.patchStatus),
+        ]
+        for (name, uuid) in rearmOrder {
+            do {
+                try await session.setNotify(false, for: uuid, timeout: 10)
+                try await Task.sleep(for: .milliseconds(90))
+                try await session.setNotify(true, for: uuid, timeout: 10)
+                clog("backfill: re-arm \(name) off→on ok")
+                try await Task.sleep(for: .milliseconds(90))
+            } catch {
+                clog("backfill: re-arm \(name) failed: \(error)")
             }
-            try? await session.setNotify(false, for: LibreSensorGATT.Char.historicData, timeout: 10)
-            clog("backfill from lifeCount \(lifeCount): \(historicalPageCount) history pages total, store now \(sampleCount()) points")
-        } catch {
-            try? await session.setNotify(false, for: LibreSensorGATT.Char.historicData, timeout: 10)
         }
+
+        guard backfillNeeded else {
+            // Fast-path reconnect: no hole to fill. The reference never
+            // issues backfill commands on a cached reconnect, and our data
+            // is complete — just stream.
+            clog("backfill: skipped (no gap — data complete)")
+            status("Live — readings update about once a minute.")
+            return
+        }
+
+        status("Filling in missing history…")
+        // Field-verified behavior (2026-11-11, this sensor): the sensor's
+        // GATT server rejects the historical/clinical backfill COMMAND from
+        // this host with "Unknown ATT error" [0xfd] for EVERY window size
+        // tested (24 h down to the reference's own 10-min overlap, seq
+        // 0x0001-0x0010, cached 0x11 and full 03 03 alike), while realtime
+        // frames decrypt fine. The reference corroborates the gate: it only
+        // backfills on first-pair and never on reconnect. So do ONE quick
+        // bounded attempt (the reference's 10-min overlap — it also seeds
+        // a few 5-min pages for chart continuity) and rely on the CLINICAL
+        // re-subscribe burst for small gaps; a multi-hour outage can only
+        // be bounded by keeping the link alive (BG link-keeper), not by
+        // backfill.
+        let quietSeconds: TimeInterval = 5
+        var sequence: UInt16 = 0x0001
+
+        func writeBackfillCommand(_ command: PatchControlCommand, sequence seq: UInt16) async throws {
+            let frame = try crypto.encrypt(
+                plaintext: command.plaintext,
+                sequence: seq,
+                kind: .patchControlWrite
+            )
+            try await session.writeRaw(frame.raw, to: LibreSensorGATT.Char.patchControl, timeout: 5)
+        }
+
+        // ── Historical: one bounded attempt (10-min overlap) ──────────────
+        do {
+            try await session.setNotify(false, for: LibreSensorGATT.Char.historicData, timeout: 10)
+            try await Task.sleep(for: .milliseconds(90))
+            try await session.setNotify(true, for: LibreSensorGATT.Char.historicData, timeout: 10)
+            try await Task.sleep(for: .milliseconds(90))
+            let fromLC: UInt16 = lifeCount >= 10 ? lifeCount - 10 : 0
+            do {
+                try await writeBackfillCommand(
+                    .historicalBackfillGreaterEqual(lifeCount: fromLC),
+                    sequence: sequence
+                )
+                clog("backfill: historical request sent (10-min overlap, from lc \(fromLC))")
+            } catch {
+                clog("backfill: historical request rejected (expected on this sensor): \(error)")
+            }
+            let pagesBefore = historicalPageCount
+            let waitStart = Date()
+            while true {
+                let now = Date()
+                let gotPages = historicalPageCount > pagesBefore
+                if gotPages, now.timeIntervalSince(lastHistoricalPageAt) >= quietSeconds { break }
+                if now.timeIntervalSince(waitStart) >= 15 { break }
+                try? await Task.sleep(for: .seconds(0.25))
+            }
+            clog("backfill: historical wait over — \(historicalPageCount) pages total (+\(historicalPageCount - pagesBefore))")
+        } catch {
+            clog("backfill: historical FAILED: \(error)")
+        }
+        try? await session.setNotify(false, for: LibreSensorGATT.Char.historicData, timeout: 10)
+
+        // ── Clinical stream (per-minute records) ──────────────────────────
+        // The sensor BUFFERS per-minute clinical records while the host is
+        // disconnected and replays the buffered window in a burst on
+        // re-subscribe (the designed minute-resolution gap-fill; field
+        // testing: 38+ contiguous records within seconds of reconnect after
+        // a multi-tens-of-minutes outage). The burst is triggered by the
+        // CCCD off→on — NOT by the patchControl command — so the wait runs
+        // regardless of whether that command is accepted.
+        do {
+            try await session.setNotify(false, for: LibreSensorGATT.Char.clinicalData, timeout: 10)
+            try await Task.sleep(for: .milliseconds(90))
+            try await session.setNotify(true, for: LibreSensorGATT.Char.clinicalData, timeout: 10)
+            clog("backfill: clinicalData CCCD enabled (waiting for burst replay)")
+            try await Task.sleep(for: .milliseconds(90))
+            let recordsBefore = clinicalRecordCount
+            let waitStart = Date()
+            while true {
+                let now = Date()
+                let got = clinicalRecordCount > recordsBefore
+                if got, now.timeIntervalSince(lastClinicalRecordAt) >= quietSeconds { break }
+                if now.timeIntervalSince(waitStart) >= 15 { break }
+                try? await Task.sleep(for: .seconds(0.25))
+            }
+            clog("backfill: clinical wait over — \(clinicalRecordCount) records total (+\(clinicalRecordCount - recordsBefore))")
+        } catch {
+            clog("backfill: clinical CCCD FAILED: \(error)")
+        }
+        try? await session.setNotify(false, for: LibreSensorGATT.Char.clinicalData, timeout: 10)
+
+        clog("backfill: complete — store now \(sampleCount()) points")
         status("Live — readings update about once a minute.")
     }
 
@@ -786,6 +934,12 @@ final class LibreDirectReader {
             }
 
         case .clinicalReadingRecord(let record):
+            // Count every clinical record (the clinical backfill burst
+            // re-emits per-minute records for the whole buffered window,
+            // including minutes that don't change the store — the count is
+            // what tells the backfill wait when the burst is over).
+            self.lastClinicalRecordAt = receivedAt
+            self.clinicalRecordCount += 1
             if let mg = record.currentGlucoseMgDL, mg > 0 {
                 self.record(
                     lifeCount: record.lifeCount,

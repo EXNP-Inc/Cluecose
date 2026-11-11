@@ -124,6 +124,7 @@ final class GlucoseModel: ObservableObject {
         linkKeeperRegisteredDone = true
         BGTaskScheduler.shared.register(forTaskWithIdentifier: linkKeeperID, using: nil) { task in
             guard let bg = task as? BGAppRefreshTask else { fatalError("wrong task") }
+            clog("LINKKEEPER BG task fired — re-kicking reconnect")
             let handler = Task { @MainActor in
                 Self.linkKeeperKick?()
                 bg.setTaskCompleted(success: true)
