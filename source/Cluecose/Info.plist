@@ -25,13 +25,17 @@
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NFCReaderUsageDescription</key>
-	<string>Cluecose taps your FreeStyle Libre sensor with NFC once to pair with it directly.</string>
+	<string>Cluecose taps your CGM sensor with NFC once to pair with it directly.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Cluecose connects to your FreeStyle Libre sensor over Bluetooth so it can detect it, wake on its transmissions, and keep your readings fresh in the background.</string>
+	<string>Cluecose connects to your CGM sensor over Bluetooth so it can detect it, wake on its transmissions, and keep your readings fresh in the background.</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Cluecose can read glucose from the Health app so you can view history from other sources and build a complete picture.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>Cluecose writes your FreeStyle Libre readings to the Health app so they're available to you and any other app you choose.</string>
+	<string>Cluecose writes your sensor readings to the Health app so they're available to you and any other app you choose.</string>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.dsikic.cluecose.linkkeeper</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>

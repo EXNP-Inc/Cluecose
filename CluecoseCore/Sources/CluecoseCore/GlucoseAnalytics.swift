@@ -104,8 +104,11 @@ public struct GlucoseTip: Identifiable, Equatable {
 
 public enum GlucoseAnalytics {
 
-    /// Storage-pressure threshold: AUC above 140 in mg/dL·min over the window.
-    /// ~1 h at ~200 mg/dL over a 24 h window. Heuristic, documented as such.
+    /// Storage-pressure threshold: AUC above 140 in mg/dL·min over the window
+    /// (mg/dL·min — one minute above the line counts 1; 1 h at 173 mg/dL ≈ 2000).
+    /// A well-controlled day is well under this (a user measured at 686);
+    /// sustained post-prandial highs over a day put it in the thousands.
+    /// Heuristic, documented as such.
     public static let storageAUC24h: Double = 2000
 
     /// Compute the full stats block for the samples covering the last
@@ -164,8 +167,12 @@ public enum GlucoseAnalytics {
             stats.tar = above / total
             stats.tbr = below / total
             stats.tbr2 = below2 / total
-            stats.aucAbove140 = auc
-            stats.aucShare = auc / total / 140  // mean excess height / 140 scale
+            // `auc` and `total` are accumulated in SECONDS (timeIntervalSince);
+            // the published AUC is mg/dL·MIN — the unit storageAUC24h and the
+            // UI label use. (Forgot this division once: the AUC read 60× too
+            // big and the burn mode was stuck on "storing" forever.)
+            stats.aucAbove140 = auc / 60
+            stats.aucShare = auc / total / 140  // mean excess height / 140 scale (unit-free)
         }
         return stats
     }

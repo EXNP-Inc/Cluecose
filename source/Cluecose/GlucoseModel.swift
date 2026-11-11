@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import ActivityKit
+import BackgroundTasks
 import CluecoseCore
 
 /// High-level app phase, derived from the reader's state.
@@ -100,6 +101,56 @@ final class GlucoseModel: ObservableObject {
     private var healthKitObserver: AnyCancellable?
     private var externalRefreshTask: Task<Void, Never>?
 
+    // MARK: Background link-keeper
+
+    /// The system's periodic wake. While the phone is locked the app is
+    /// suspended, so the in-process 30 s reconnect loop freezes. Because the
+    /// Libre is a GATT *server* (it never re-dials the phone), a dropped link
+    /// then stays down until something re-wakes the central. A
+    /// `BGAppRefreshTask` wakes the app periodically; we re-kick the
+    /// reconnect, and once the BLE connection is up the `bluetooth-central`
+    /// background mode keeps the process alive to stream. This bounds the
+    /// worst-case outage from hours to the system's refresh interval.
+    static let linkKeeperID = "com.dsikic.cluecose.linkkeeper"
+    private static let linkKeeperRegistered = NSLock()
+    private static var linkKeeperRegisteredDone = false
+    /// Set by init so the BG handler can re-kick this instance's reconnect.
+    private static var linkKeeperKick: (@MainActor () -> Void)?
+
+    private static func registerLinkKeeperOnce() {
+        linkKeeperRegistered.lock()
+        defer { linkKeeperRegistered.unlock() }
+        guard !linkKeeperRegisteredDone else { return }
+        linkKeeperRegisteredDone = true
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: linkKeeperID, using: nil) { task in
+            guard let bg = task as? BGAppRefreshTask else { fatalError("wrong task") }
+            let handler = Task { @MainActor in
+                Self.linkKeeperKick?()
+                bg.setTaskCompleted(success: true)
+            }
+            bg.expirationHandler = { handler.cancel() }
+        }
+    }
+
+    /// Re-kick the sensor reconnect only (light — safe for a ~30 s BG window).
+    func kickReconnect() {
+        // Healthy link → `bluetooth-central` is maintaining it; nothing to do.
+        guard !linkActive else { return }
+        directReader.start()
+        // Chain the next wake so a still-down link keeps getting retry
+        // chances instead of going silent until the next foreground.
+        scheduleLinkKeeper()
+    }
+
+    /// Schedule the next background link-keeper wake. Called on launch and
+    /// from the handler so the chain continues.
+    func scheduleLinkKeeper() {
+        let request = BGAppRefreshTaskRequest(identifier: Self.linkKeeperID)
+        // Ask in ~15 min; the system may coalesce to its own cadence.
+        request.earliestBeginDate = Date().addingTimeInterval(15 * 60)
+        try? BGTaskScheduler.shared.submit(request)
+    }
+
     // MARK: Init
 
     init() {
@@ -115,6 +166,11 @@ final class GlucoseModel: ObservableObject {
         liveActivityEnabled = UserDefaults.standard.bool(forKey: LiveActivityManager.enabledKey)
 
         directReader = LibreDirectReader()
+        // Register the background link-keeper once per launch and point the
+        // BG handler at THIS instance's reconnect. (After directReader exists
+        // so the weak-self closure can form.)
+        Self.registerLinkKeeperOnce()
+        Self.linkKeeperKick = { [weak self] in self?.kickReconnect() }
         directReader.onStatus = { [weak self] text in
             Task { @MainActor [weak self] in
                 self?.status = text
@@ -155,6 +211,9 @@ final class GlucoseModel: ObservableObject {
         refreshDerived()
         startHealthKit()
         WatchPusher.shared.activate()
+        // Chain the background link-keeper so a locked, suspended app still
+        // re-acquires the sensor within the system's refresh cadence.
+        scheduleLinkKeeper()
         // Restore the Live Activity on launch: the toggle's didSet only fires
         // on a change, so an app relaunch (or the sensor reconnecting after a
         // reinstall) needs an explicit sync to bring the activity back.
@@ -235,7 +294,7 @@ final class GlucoseModel: ObservableObject {
                     // Ladder exhausted: the sensor was activated by an Abbott
                     // app and our IDs don't match. Ask for the account UUID.
                     needsReceiverID = true
-                    lastError = "This sensor was registered under a LibreView account. Its Account ID is a UUID — open the LibreView app (or log in at libreview.com) and copy the Account ID from your account / report link. Paste it in the field above, then tap the sensor again. It never leaves your phone."
+                    lastError = "This sensor was registered by another app's account. That app's Account ID is a UUID — open it (or its website) and copy the Account ID from your account / report page, paste it in the field above, then tap the sensor again. It never leaves your phone."
                     break
                 }
             }

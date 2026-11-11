@@ -175,8 +175,16 @@ final class LibreDirectReader {
     private var sampleStore: [UInt16: (mg: UInt16, date: Date)] = [:]
     private let storeLock = NSLock()
 
-    /// Last data-plane notify timestamp (backfill quiet-detection).
+    /// Last data-plane notify timestamp.
     private var lastNotifyAt = Date.distantPast
+
+    /// Last historical-page timestamp + page count. The realtime stream and
+    /// the historic backfill share the notify pipeline, so backfill
+    /// completion must track pages specifically — otherwise a steady
+    /// realtime notify keeps the pipeline busy forever (or a single
+    /// realtime sample makes a page-less backfill look "done").
+    private var lastHistoricalPageAt = Date.distantPast
+    private var historicalPageCount = 0
 
     // MARK: Lifecycle
 
@@ -701,38 +709,52 @@ final class LibreDirectReader {
         fromLifeCount lifeCount: UInt16
     ) async {
         status("Filling in the last 24 h of history…")
-        let firstActivityTimeout: TimeInterval = state?.lastGlucoseLifeCount == nil ? 12 : 8
-        let quietSeconds: TimeInterval = 3
-        let maxSeconds: TimeInterval = 90
-        let baseline = sampleCount()
+        // A 24 h pull is ~288 historical pages (6 samples at 5-min stride
+        // per page). After a long outage the sensor takes several seconds to
+        // start streaming the backlog, and the stream then runs for minutes.
+        // The old 8-second "give up" cut the pull short and left the outage
+        // hole in the chart (only the live stream's first point arrived).
+        let firstActivityTimeout: TimeInterval = 15
+        let quietSeconds: TimeInterval = 5
+        let maxSeconds: TimeInterval = 300
         do {
             try await session.setNotify(true, for: LibreSensorGATT.Char.historicData, timeout: 10)
             try? await Task.sleep(for: .milliseconds(150))
-            let command = PatchControlCommand.historicalBackfillGreaterEqual(lifeCount: lifeCount)
-            let frame = try crypto.encrypt(
-                plaintext: command.plaintext,
-                sequence: 0x0001,
-                kind: .patchControlWrite
-            )
-            try await session.writeRaw(frame.raw, to: LibreSensorGATT.Char.patchControl, timeout: 10)
+            var sequence: UInt16 = 0x0001
+            for attempt in 1...3 {
+                let command = PatchControlCommand.historicalBackfillGreaterEqual(lifeCount: lifeCount)
+                let frame = try crypto.encrypt(
+                    plaintext: command.plaintext,
+                    sequence: sequence,
+                    kind: .patchControlWrite
+                )
+                try await session.writeRaw(frame.raw, to: LibreSensorGATT.Char.patchControl, timeout: 10)
 
-            // Wait for the historic stream to go quiet (PoC timing).
-            let start = Date()
-            var sawActivity = sampleCount() > baseline
-            while true {
-                let now = Date()
-                let elapsed = now.timeIntervalSince(start)
-                if sampleCount() > baseline { sawActivity = true }
-                if sawActivity,
-                   now.timeIntervalSince(lastNotifyAt) >= quietSeconds {
-                    break
-                } else if elapsed >= firstActivityTimeout {
-                    break
+                // Wait for the historic stream to finish: a full pull only
+                // ends when the sensor goes quiet AFTER it has streamed
+                // pages, or when the hard cap is hit. Track pages
+                // specifically — the realtime stream keeps the shared
+                // notify pipeline busy and would mask the true end.
+                // No pages within the first-activity window → re-issue the
+                // request (the sensor occasionally ignores a backfill
+                // command issued right after Phase 6).
+                let pagesBefore = historicalPageCount
+                let attemptStart = Date()
+                while true {
+                    let now = Date()
+                    let gotPages = historicalPageCount > pagesBefore
+                    if gotPages,
+                       now.timeIntervalSince(lastHistoricalPageAt) >= quietSeconds { break }
+                    if !gotPages, now.timeIntervalSince(attemptStart) >= firstActivityTimeout { break }
+                    if now.timeIntervalSince(attemptStart) >= maxSeconds { break }
+                    try? await Task.sleep(for: .seconds(0.25))
                 }
-                if elapsed >= maxSeconds { break }
-                try? await Task.sleep(for: .seconds(0.5))
+                if historicalPageCount > pagesBefore || attempt == 3 { break }
+                clog("backfill: no history pages within \(Int(firstActivityTimeout))s — re-requesting (\(attempt + 1)/3)")
+                sequence = sequence &+ 1
             }
             try? await session.setNotify(false, for: LibreSensorGATT.Char.historicData, timeout: 10)
+            clog("backfill from lifeCount \(lifeCount): \(historicalPageCount) history pages total, store now \(sampleCount()) points")
         } catch {
             try? await session.setNotify(false, for: LibreSensorGATT.Char.historicData, timeout: 10)
         }
@@ -773,6 +795,7 @@ final class LibreDirectReader {
             }
 
         case .historicalReadingPage(let page):
+            self.lastHistoricalPageAt = receivedAt
             for sample in page.samples {
                 if let mg = sample.glucoseMgDL, mg > 0 {
                     record(
@@ -882,7 +905,7 @@ final class LibreDirectReader {
         case .readerUnavailable: return .nfcUnavailable
         case .noTag: return .nfcNoTag
         case .multipleTags: return .nfcReadFailed("more than one tag detected — move other cards/tags away")
-        case .nonISO15693Tag: return .nfcReadFailed("tag is not a Libre sensor")
+        case .nonISO15693Tag: return .nfcReadFailed("tag is not a supported CGM sensor")
         case .sessionAlreadyActive: return .nfcCancelled
         case .invalidActivationResponse(let raw):
             // Not a 0xB1 mismatch but an unexpected frame. Surface the exact

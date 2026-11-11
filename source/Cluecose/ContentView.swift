@@ -22,7 +22,7 @@ struct ContentView: View {
                         pairCard
                     }
 
-                    if let reading = model.latest {
+                    if let reading = liveReading {
                         heroCard(reading)
                         statsCard
                         BurnModeCard()
@@ -57,6 +57,25 @@ struct ContentView: View {
         }
     }
 
+    /// The reading to put on the hero card. `model.latest` alone is not safe
+    /// after a reset/restore: the Health-app read-back (`refreshExternal`)
+    /// refills `allSamples` with samples from BEFORE the reset, so a 14 h-old
+    /// value renders as "Now" while the app is still linking to the sensor —
+    /// the glucose card and the linking card both showing for a while.
+    ///
+    /// The hero is presented only for data we can trust:
+    ///   • a fresh reading (≤ 25 min) — whatever its source, or
+    ///   • stale data, but ONLY while the direct link is up and we hold
+    ///     direct-BLE samples (a genuinely stale reading, "Last reading 40 min
+    ///     ago"). Health-app history alone never dresses up as a reading.
+    /// Otherwise the linking/listening card stands alone.
+    private var liveReading: GlucoseSample? {
+        guard let latest = model.latest else { return nil }
+        if model.isFresh { return latest }
+        guard model.linkActive, !model.samples.isEmpty else { return nil }
+        return latest
+    }
+
     // MARK: Header
 
     private var header: some View {
@@ -71,7 +90,7 @@ struct ContentView: View {
                     Text("Cluecose")
                         .font(.system(size: 20, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
-                    Text("FreeStyle Libre · direct Bluetooth")
+                    Text("CGM · direct Bluetooth")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.55))
                 }
@@ -178,14 +197,14 @@ struct ContentView: View {
 
     private var pairingSubtitle: String {
         if model.needsReceiverID {
-            return "To read this sensor Cluecose needs the same account identity the Libre app used. Open the LibreView app (or libreview.com) and copy your Account ID — the UUID in your account page or report link — into the field below. It's just an identifier — it never leaves your phone."
+            return "To read this sensor Cluecose needs the same account identity the sensor's activation app used. Open that app (or its website) and copy your Account ID — the UUID in your account page or report link — into the field below. It's just an identifier — it never leaves your phone."
         }
         return "Hold the top edge of your phone against your sensor for a second. This links Cluecose directly to it over Bluetooth so readings update the moment the sensor broadcasts — no account, no cloud."
     }
 
     private var accountIDField: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Libre app Account ID (UUID)")
+            Text("Activation app Account ID (UUID)")
                 .font(.footnote.weight(.medium))
                 .foregroundStyle(.white.opacity(0.7))
             TextField("e.g. 2977dec2-492a-11ea-9702-0242ac110002",
@@ -456,7 +475,7 @@ struct ContentView: View {
         switch model.phase {
         case .waitingBLE:
             title = "Linking to your sensor…"
-            detail = "Waiting for your FreeStyle Libre's Bluetooth window — it connects on and off in ~minute cycles. This can take up to a minute."
+            detail = "Waiting for your sensor's Bluetooth window — it opens a connection window about every minute. This can take up to a minute."
         case .listening:
             title = "Listening to your sensor"
             detail = model.isWarmingUp
@@ -547,7 +566,7 @@ struct ContentView: View {
     }
 
     private var footer: some View {
-        Text("Reads your Libre 3 directly over Bluetooth — no account, no cloud. Optional Health app sync is on-device only.")
+        Text("Reads your sensor directly over Bluetooth — no account, no cloud. Optional Health app sync is on-device only.")
             .font(.caption2)
             .foregroundStyle(.white.opacity(0.35))
             .multilineTextAlignment(.center)
