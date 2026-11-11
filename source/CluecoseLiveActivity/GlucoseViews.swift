@@ -85,16 +85,16 @@ struct GlucoseCompactLeading: View {
     private var unit: GlucoseUnit { GlucoseUnit(rawValue: attributes.unit) ?? .mgdl }
 
     var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: Trend(wireValue: state.trend).symbol)
-                .font(.system(size: 9, weight: .bold))
-            Text(unit.format(fromMgdl: state.mgdl))
-                .font(.system(size: 13, weight: .heavy, design: .rounded))
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-        }
-        .foregroundStyle(state.isFresh ? glucoseTint(mgdl: state.mgdl) : .orange)
+        // Value only, filling the whole capsule. On the iPhone Duo's cover
+        // display the compact capsule is narrower than on a standard
+        // iPhone — an extra glyph in front of the value pushed "6.9" into
+        // "6…". The trend arrow now lives in the trailing capsule.
+        Text(unit.format(fromMgdl: state.mgdl))
+            .font(.system(size: 13, weight: .heavy, design: .rounded))
+            .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+            .foregroundStyle(state.isFresh ? glucoseTint(mgdl: state.mgdl) : .orange)
     }
 }
 
@@ -104,11 +104,11 @@ struct GlucoseCompactTrailing: View {
     var state: CluecoseGlucoseAttributes.ContentState
 
     var body: some View {
-        // The compact capsule has no room for the unit — a single status dot
-        // is all that fits next to the number + arrow in the leading capsule.
-        Circle()
-            .fill(state.isFresh ? glucoseTint(mgdl: state.mgdl) : .orange)
-            .frame(width: 4, height: 4)
+        // The trend arrow: one small glyph that always fits, even in the
+        // narrower iPhone Duo compact capsule.
+        Image(systemName: Trend(wireValue: state.trend).symbol)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(state.isFresh ? glucoseTint(mgdl: state.mgdl) : .orange)
     }
 }
 
