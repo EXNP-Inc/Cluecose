@@ -264,8 +264,16 @@ class NfcActivationReader(activity: Activity) {
             throw Failure.TransceiveFailed(e.message ?: "transceive failed")
         }
         if (resp == null || resp.isEmpty()) throw Failure.TransceiveFailed("empty response")
+        // Log the EXACT command sent and raw response bytes — this is the only
+        // way to tell a receiver-mismatch (0xB1) apart from any other short
+        // rejection frame, and the difference decides the whole fix.
+        Log.i(TAG, "TX ${toHex(command)}")
+        Log.i(TAG, "RX ${toHex(resp)} (${resp.size}B) flag=0x${(resp[0].toInt() and 0xFF).toString(16)}")
         return resp
     }
+
+    private fun toHex(b: ByteArray): String =
+        b.joinToString(" ") { "%02x".format(it.toInt() and 0xFF) }
 
     /**
      * ISO 15693 error frame: `[flag=0x01][code][optional CRC16]`. The
