@@ -275,9 +275,13 @@ class NfcActivationReader(activity: Activity) {
     companion object {
         private const val TAG = "CluecoseNfc"
 
-        // ISO 15693 lives on the NFC-A physical layer; skip NDEF discovery —
-        // the sensor is a raw transceive target, not an NDEF tag.
+        // ISO 15693 is its OWN physical layer — NfcV in Android terms
+        // (FLAG_READER_NFC_V = 0x08), NOT NFC-A (ISO 14443A, 0x01). Arming with
+        // NFC-A made the chip poll for the wrong tag family, so the sensor was
+        // invisible even on a healthy chip (verified: dumpsys nfc showed
+        // mTechMask: 1 = NFC-A only, zero tag-detection events on hold).
+        // Skip NDEF discovery — the sensor is a raw transceive target.
         private const val READER_FLAGS =
-            NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK
+            NfcAdapter.FLAG_READER_NFC_V or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK
     }
 }
