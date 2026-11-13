@@ -205,12 +205,22 @@ class NfcActivationReader(activity: Activity) {
     /** Runs the two-command exchange; called on the "cluecose-nfc" thread. */
     private fun performExchange(tag: Tag, mySession: Int) {
         val nfcV = NfcV.get(tag) ?: throw Failure.TagNotIso15693
-        val patchInfo = readPatchInfo(nfcV)
-        Log.i(TAG, "patch info ok: serial=${patchInfo.serialNumber} state=0x${patchInfo.stateByte.toString(16)} cmd=${patchInfo.recommendedCommandCode}")
-        val activation = activateOrSwitch(nfcV, patchInfo, receiverId)
-        Log.i(TAG, "activation ok: ble=${activation.bleAddressDisplay} timeRaw=${activation.activationTimeRaw.size}B")
-        inFlight = false
-        report(PairingResult(patchInfo, activation), null, mySession)
+        // Android's BasicTagTechnology requires connect() BEFORE transceive();
+        // omitting it makes the first transceive() throw
+        // IllegalStateException("Call connect() first!"). The Tag is scoped to
+        // this one discovery, so disconnect on the way out — a re-hold yields a
+        // fresh Tag object and re-arms the exchange.
+        try {
+            nfcV.connect()
+            val patchInfo = readPatchInfo(nfcV)
+            Log.i(TAG, "patch info ok: serial=${patchInfo.serialNumber} state=0x${patchInfo.stateByte.toString(16)} cmd=${patchInfo.recommendedCommandCode}")
+            val activation = activateOrSwitch(nfcV, patchInfo, receiverId)
+            Log.i(TAG, "activation ok: ble=${activation.bleAddressDisplay} timeRaw=${activation.activationTimeRaw.size}B")
+            inFlight = false
+            report(PairingResult(patchInfo, activation), null, mySession)
+        } finally {
+            runCatching { nfcV.close() }
+        }
     }
 
     private fun readPatchInfo(nfcV: NfcV): Libre3NFCPatchInfo {
