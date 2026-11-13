@@ -15,17 +15,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,6 +45,8 @@ import androidx.compose.ui.window.DialogProperties
 @Composable
 fun SettingsSheet(
     state: UiState,
+    ownerReceiverId: String,
+    onOwnerReceiverIdChange: (String) -> Unit,
     onDismiss: () -> Unit,
     onRePair: () -> Unit,
     onForgetSensor: () -> Unit,
@@ -103,6 +108,10 @@ fun SettingsSheet(
                 ActionRow(
                     text = "Re-pair with NFC tap",
                     onClick = onRePair,
+                )
+                ReceiverIdField(
+                    value = ownerReceiverId,
+                    onValueChange = onOwnerReceiverIdChange,
                 )
 
                 // MARK: Data
@@ -186,6 +195,52 @@ private fun SettingRow(
             text = value,
             fontSize = 14.sp,
             color = valueColor,
+        )
+    }
+}
+
+/**
+ * Free-form receiver ID field (little-endian hex, 8 digits) for the "sensor
+ * bound to another install" case — the Android mirror of iOS's LibreView
+ * Account ID field (GlucoseModel.needsReceiverID). The value is presented
+ * FIRST by the NFC candidate ladder before this install's own accountless ID.
+ */
+@Composable
+private fun ReceiverIdField(value: String, onValueChange: (String) -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "Other install's receiver ID",
+                fontSize = 14.sp,
+                color = CluecoseColors.white(0.75f),
+                modifier = Modifier.weight(1f),
+            )
+            if (value.isNotEmpty()) {
+                Text(
+                    text = "clear",
+                    fontSize = 13.sp,
+                    color = CluecoseColors.GlowInRange,
+                    modifier = Modifier
+                        .padding(start = 10.dp)
+                        .clickable { onValueChange("") },
+                )
+            }
+        }
+        OutlinedTextField(
+            value = value,
+            onValueChange = { if (it.length <= 16) onValueChange(it) },
+            singleLine = true,
+            label = { Text("e.g. d82eec8f", fontSize = 12.sp) },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp),
+        )
+        Text(
+            text = "Only needed when the sensor was paired on another phone/install. 8 hex digits, little-endian.",
+            style = MaterialTheme.typography.labelSmall,
+            color = CluecoseColors.white(0.35f),
+            modifier = Modifier.padding(top = 4.dp),
         )
     }
 }

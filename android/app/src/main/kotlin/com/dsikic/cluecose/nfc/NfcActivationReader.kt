@@ -225,12 +225,10 @@ class NfcActivationReader(activity: Activity) {
 
     private fun readPatchInfo(nfcV: NfcV): Libre3NFCPatchInfo {
         val resp = transceive(nfcV, NFCActivationCommand.READ_PATCH_INFO)
-        val flag = resp[0].toInt() and 0xFF
-        if (flag and 1 != 0) throw errorFrameFailure(resp)
-        // Strip the leading ISO 15693 flag byte only. The remaining body is the
-        // `00 A5 …` frame (its own trailing CRC stays; the core parser tolerates
-        // extra trailing bytes for the variable-length patch info).
-        val body = resp.copyOfRange(1, resp.size)
+        if (isErrorResponse(resp)) throw errorFrameFailure(resp)
+        // Strip the optional leading 0x00 status prefix only — keep the 0xA5
+        // pad (the core parser normalizes `A5 …` → `00 A5 …`).
+        val body = stripResponsePrefix(resp)
         return try {
             Libre3NFCPatchInfo(body)
         } catch (e: Libre3NFCError) {
@@ -243,12 +241,10 @@ class NfcActivationReader(activity: Activity) {
         val timeSeconds = (System.currentTimeMillis() / 1000L).toInt()
         val command = NFCActivationCommand.command(patchInfo.recommendedCommandCode, timeSeconds, id)
         val resp = transceive(nfcV, command)
-        val flag = resp[0].toInt() and 0xFF
-        if (flag and 1 != 0) throw errorFrameFailure(resp)
-        // Strip the leading flag byte only: the core `Libre3NFCActivationResponse`
-        // expects the 19-byte `00 A5 00 … ‖ CRC2` frame, whose last 2 bytes ARE
-        // the ISO 15693 CRC.
-        val body = resp.copyOfRange(1, resp.size)
+        if (isErrorResponse(resp)) throw errorFrameFailure(resp)
+        // The core `Libre3NFCActivationResponse` expects the 19-byte
+        // `00 A5 00 … ‖ CRC2` frame, whose last 2 bytes ARE the ISO 15693 CRC.
+        val body = stripResponsePrefix(resp)
         return try {
             Libre3NFCActivationResponse(body)
         } catch (e: Libre3NFCError) {
@@ -276,12 +272,44 @@ class NfcActivationReader(activity: Activity) {
         b.joinToString(" ") { "%02x".format(it.toInt() and 0xFF) }
 
     /**
-     * ISO 15693 error frame: `[flag=0x01][code][optional CRC16]`. The
-     * receiver-mismatch code 0xB1 sits right after the flag byte.
+     * Response header: an optional leading 0x00 status byte, then the 0xA5 pad.
+     * Returns the index of the byte AFTER the pad — where an error frame's
+     * flag byte (ISO 15693, bit 0 = error) sits, and where a normal frame's
+     * body starts. Field-verified rejection: `00 a5 01 b1` (prefix, pad,
+     * flag=0x01, code=0xB1 receiver-mismatch).
+     */
+    private fun responseHeader(resp: ByteArray): Int = when {
+        resp.size >= 2 && (resp[0].toInt() and 0xFF) == 0x00 && (resp[1].toInt() and 0xFF) == 0xA5 -> 2
+        resp.isNotEmpty() && (resp[0].toInt() and 0xFF) == 0xA5 -> 1
+        else -> 0
+    }
+
+    /** True when the sensor answered with an ISO 15693 error frame. */
+    private fun isErrorResponse(resp: ByteArray): Boolean {
+        val i = responseHeader(resp)
+        if (i >= resp.size) return false
+        return (resp[i].toInt() and 1) != 0
+    }
+
+    /**
+     * Strip ONLY the leading 0x00 status prefix (keep the 0xA5 pad — the core
+     * parsers normalize `A5 …` → `00 A5 …` and expect the trailing CRC intact).
+     */
+    private fun stripResponsePrefix(resp: ByteArray): ByteArray =
+        if (resp.size >= 2 && (resp[0].toInt() and 0xFF) == 0x00 && (resp[1].toInt() and 0xFF) == 0xA5)
+            resp.copyOfRange(1, resp.size)
+        else resp
+
+    /**
+     * ISO 15693 error frame: `[… 00][A5][flag=0x01][code][optional CRC16]`.
+     * The receiver-mismatch code 0xB1 sits right after the flag byte.
      */
     private fun errorFrameFailure(resp: ByteArray): Failure {
-        val code = if (resp.size >= 2) resp[1].toInt() and 0xFF else 0
-        Log.w(TAG, "sensor error frame: flag=0x${(resp[0].toInt() and 0xFF).toString(16)} code=0x${code.toString(16)}")
+        val flagIdx = responseHeader(resp)
+        val flag = if (flagIdx < resp.size) resp[flagIdx].toInt() and 0xFF else 0
+        val codeIdx = flagIdx + 1
+        val code = if (codeIdx < resp.size) resp[codeIdx].toInt() and 0xFF else 0
+        Log.w(TAG, "sensor error frame: flag=0x${flag.toString(16)} code=0x${code.toString(16)}")
         return if (code == 0xB1) Failure.ReceiverMismatch else Failure.SensorRejected(code)
     }
 

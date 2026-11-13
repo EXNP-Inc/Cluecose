@@ -116,6 +116,20 @@ class GlucoseViewModel
         repository.forgetSensor()
     }
 
+    /**
+     * Set the receiver ID (little-endian hex, e.g. `d82eec8f`) the sensor's
+     * current owner used to activate it. Presented first by the NFC candidate
+     * ladder; null clears it. Mirrors iOS's account-ID field for the
+     * "sensor bound to another app/install" case.
+     */
+    fun setOwnerReceiverId(leHex: String?) {
+        (repository as? RealGlucoseRepository)?.nfcOwnerReceiverIdLEHex = leHex
+    }
+
+    /** The persisted owner receiver ID ("" when unset) — for the settings field. */
+    fun ownerReceiverIdLEHex(): String =
+        (repository as? RealGlucoseRepository)?.nfcOwnerReceiverIdLEHex.orEmpty()
+
     /** Header unit toggle (mg/dL <-> mmol/L). */
     fun setUnit(unit: GlucoseUnit) {
         _state.update { it.copy(unit = unit) }

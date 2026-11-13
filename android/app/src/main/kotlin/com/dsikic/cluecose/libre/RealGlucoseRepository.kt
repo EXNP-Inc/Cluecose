@@ -127,6 +127,29 @@ class RealGlucoseRepository(
     @Volatile private var reconnecting = false
     @Volatile private var samplesEmitted = false
 
+    /**
+     * The receiver ID the sensor's CURRENT owner used to activate it,
+     * little-endian hex (e.g. the Cluecose iOS install's stable accountless
+     * receiver ID — a different Android install generates its own UUID, so its
+     * accountless ID is rejected with 0xB1 until the sensor is re-bound).
+     * Presented FIRST by the [nfcPair] candidate ladder; the install's own
+     * accountless ID is the fallback. Mirrors iOS's account-ID field, but for
+     * a Cluecose install rather than an Abbott app.
+     */
+    @Volatile
+    var nfcOwnerReceiverIdLEHex: String? = prefs.getString(OWNER_RECEIVER_ID_KEY, null)
+        set(value) {
+            field = value
+            prefs.edit().apply {
+                if (value == null) remove(OWNER_RECEIVER_ID_KEY) else putString(OWNER_RECEIVER_ID_KEY, value)
+                apply()
+            }
+        }
+
+    /** The candidate ladder for the in-flight pair (owner ID first). */
+    @Volatile private var receiverCandidates: List<Libre3ReceiverID> = emptyList()
+    @Volatile private var receiverCandidateIndex = 0
+
     @Volatile private var reconnectAttempt = 0 // worker + reconnect threads (backoff counter only)
 
     init {
@@ -199,24 +222,44 @@ class RealGlucoseRepository(
         nfcPairInFlight = true
         emit(Event.NfcAwaiting(true))
         emit(Event.Status("Hold the top of the phone to the sensor — pairing over NFC…"))
-        val receiverId = accountlessReceiverID().value
+        // Candidate ladder (mirrors iOS GlucoseModel.pair()): the receiver ID
+        // the sensor's current owner used FIRST — a switch-receiver from any
+        // other ID is rejected with 0xB1 — then this install's own accountless
+        // ID (covers sensors activated by a different Android install).
+        receiverCandidates = buildList {
+            nfcOwnerReceiverIdLEHex?.let { hex ->
+                runCatching { Libre3ReceiverID.fromLittleEndianHex(hex) }.getOrNull()?.let { add(it) }
+            }
+            val own = accountlessReceiverID()
+            if (none { it == own }) add(own)
+        }
+        receiverCandidateIndex = 0
+        Log.i(TAG, "NFC pair ladder: ${receiverCandidates.joinToString { it.displayString }}")
         reader.onComplete = { result, failure -> onNfcComplete(reader, result, failure) }
         worker.execute {
             // Release any existing link before the sensor switches to us.
             teardownSession()
             reconnecting = false
             if (!nfcPairInFlight) return@execute
-            try {
-                reader.start(receiverId)
-            } catch (e: NfcActivationReader.Failure) {
-                onNfcComplete(reader, null, e)
-            } catch (e: Exception) {
-                onNfcComplete(
-                    reader,
-                    null,
-                    NfcActivationReader.Failure.TransceiveFailed(e.message ?: "reader start failed"),
-                )
-            }
+            startReaderWithCurrentCandidate(reader)
+        }
+    }
+
+    /** Arm the reader with the ladder's current receiver-ID candidate. */
+    private fun startReaderWithCurrentCandidate(reader: NfcActivationReader) {
+        val idx = receiverCandidateIndex
+        val candidate = receiverCandidates.getOrNull(idx)
+            ?: accountlessReceiverID()
+        try {
+            reader.start(candidate.value)
+        } catch (e: NfcActivationReader.Failure) {
+            onNfcComplete(reader, null, e)
+        } catch (e: Exception) {
+            onNfcComplete(
+                reader,
+                null,
+                NfcActivationReader.Failure.TransceiveFailed(e.message ?: "reader start failed"),
+            )
         }
     }
 
@@ -251,6 +294,41 @@ class RealGlucoseRepository(
     ) {
         if (!nfcPairInFlight) return
         nfcPairInFlight = false
+
+        // Receiver mismatch (0xB1): the sensor is bound to another receiver ID
+        // (e.g. the Cluecose iOS install). Advance the candidate ladder and
+        // re-arm — mirroring iOS GlucoseModel.pair() ("tap it again to try the
+        // next one"). The disable→enable cycle re-discovers a tag still held
+        // in the field, so no extra hold is usually needed.
+        if (result == null && failure is NfcActivationReader.Failure.ReceiverMismatch) {
+            val next = receiverCandidateIndex + 1
+            if (next < receiverCandidates.size) {
+                receiverCandidateIndex = next
+                emit(Event.NfcAwaiting(true))
+                emit(
+                    Event.Status(
+                        "That receiver ID was rejected — hold the top of the phone to the sensor to try the next…",
+                    ),
+                )
+                worker.execute {
+                    reader.stop()
+                    startReaderWithCurrentCandidate(reader)
+                }
+                return
+            }
+            emit(Event.NfcAwaiting(false))
+            reader.stop()
+            isWorking = false
+            emit(
+                Event.Status(
+                    "The sensor is bound to a receiver ID this install doesn't have. " +
+                        "Settings → Re-pair can set the other install's receiver ID; " +
+                        "otherwise pair the sensor fresh on this phone.",
+                ),
+            )
+            return
+        }
+
         emit(Event.NfcAwaiting(false))
         reader.stop()
         if (result == null) {
@@ -271,13 +349,18 @@ class RealGlucoseRepository(
     }
 
     private fun nfcPairConnect(result: NfcActivationReader.PairingResult) {
-        val receiverId = accountlessReceiverID()
+        // Record the receiver ID the sensor actually accepted (the ladder's
+        // current candidate), not blindly this install's accountless one — the
+        // persisted value must match what activated the sensor.
+        val usedIndex = receiverCandidateIndex
+        val receiverId = receiverCandidates.getOrNull(usedIndex) ?: accountlessReceiverID()
+        val receiverSource = if (usedIndex == 0 && nfcOwnerReceiverIdLEHex != null) "ownerId" else "accountless"
         val newState = DirectSensorState(
             serialNumber = result.patchInfo.serialNumber,
             bleAddress = result.activation.bleAddressDisplay,
             blePIN = result.activation.blePIN.copyOf(),
             receiverIDLEHex = receiverId.littleEndianHex,
-            receiverIDSource = "accountless",
+            receiverIDSource = receiverSource,
             activationTimeSeconds = activationEpochSeconds(result.activation.activationTimeRaw),
             warmupDurationMinutes = result.patchInfo.warmupMinutes,
             wearDurationMinutes = result.patchInfo.wearDurationMinutes,
@@ -889,6 +972,7 @@ class RealGlucoseRepository(
         const val STATE_KEY = "cluecose.libre.directState"
         const val SAMPLES_KEY = "cluecose.libre.directSamples"
         const val ACCOUNTLESS_KEY = "cluecose.libre.accountlessID"
+        const val OWNER_RECEIVER_ID_KEY = "cluecose.libre.ownerReceiverID"
 
         /** 48 h sample window (iOS `Self.window`). */
         private const val WINDOW_MS = 48L * 60 * 60 * 1000

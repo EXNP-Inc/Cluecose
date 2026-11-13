@@ -189,8 +189,16 @@ private fun CluecoseRoot(viewModel: GlucoseViewModel) {
         }
 
         if (showSettings) {
+            var receiverId by remember {
+                mutableStateOf(viewModel.ownerReceiverIdLEHex())
+            }
             SettingsSheet(
                 state = state,
+                ownerReceiverId = receiverId,
+                onOwnerReceiverIdChange = {
+                    receiverId = it
+                    viewModel.setOwnerReceiverId(it.trim().takeIf { s -> s.isNotEmpty() })
+                },
                 onDismiss = { showSettings = false },
                 onRePair = {
                     showSettings = false
