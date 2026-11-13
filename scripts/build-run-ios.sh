@@ -16,7 +16,11 @@ DERIVED=build/dd-ios
 if [[ $# -ge 1 ]]; then
     DEVICE=$1
     # Resolve a friendly name to the UDID; xcodebuild `id=` needs the UDID.
-    if [[ "$DEVICE" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}- ]]; then
+    # Glob (not `[[ =~ ]]` nor `grep -E`): macOS bash 3.2 and BSD grep 2.6
+    # both mishandle a quantified class followed by a dash, which made the
+    # UDID fall through to name resolution. Accept any hex+dash token 10-40
+    # chars (covers 25-char and 36-char UDID forms).
+    if [[ ${#DEVICE} -ge 10 && ${#DEVICE} -le 40 && -z ${DEVICE//[0-9A-Fa-f-]/} && "$DEVICE" == *-* ]]; then
         UDID=$DEVICE
     else
         ROW=$(xcrun devicectl list devices 2>/dev/null | grep -E "^[[:space:]]*$DEVICE[[:space:]]" | head -1)

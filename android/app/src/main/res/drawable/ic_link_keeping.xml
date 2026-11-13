@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Small notification icon for the LinkKeeperService foreground service.
+    Vector "sensor" glyph: a dot with two signal arcs (same motif as the
+    listening radar), drawn for the status-bar / notification tray.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- center dot -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,12m-2.6,0a2.6,2.6 0 1 0 5.2,0a2.6,2.6 0 1 0 -5.2,0" />
+    <!-- inner signal arc -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:pathData="M8.2,8.2a5.4,5.4 0 0 1 7.6,0" />
+    <!-- outer signal arc -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:pathData="M5.4,5.4a9.4,9.4 0 0 1 13.2,0" />
+</vector>

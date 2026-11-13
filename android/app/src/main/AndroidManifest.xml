@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- NFC first-pair (reader mode) -->
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
+
+    <!-- BLE: classic permissions, required on API 26–30 for scan results -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:maxSdkVersion="30" />
+
+    <!-- BLE: new permissions, API 31+ only (never for location: MAC-only targeting) -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!-- Link-keeper foreground service keeps GATT alive in background -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Health Connect (feature-detected at runtime; not present on API 26) -->
+    <uses-permission android:name="android.permission.health.READ_HEALTH_DATA" />
+    <uses-permission android:name="android.permission.health.WRITE_HEALTH_DATA" />
+
+    <application
+        android:name=".CluecoseApp"
+        android:allowBackup="true"
+        android:label="Cluecose"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Cluecose">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Cluecose"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Link-keeper: foreground service mirroring the iOS BG task -->
+        <service
+            android:name=".LinkKeeperService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice"
+            tools:targetApi="Q" />
+    </application>
+
+</manifest>
