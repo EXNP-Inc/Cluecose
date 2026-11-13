@@ -190,6 +190,12 @@ class GattSession(
             disconnect()
             throw GattError.ConnectFailed("connection timed out")
         }
+        // connectGatt does NOT start service discovery — the
+        // onServicesDiscovered latch above only fires after this call.
+        if (!g.discoverServices()) {
+            disconnect()
+            throw GattError.ServicesDiscovered(256) // ERROR_GATT_FAILURE (AOSP-internal constant)
+        }
         if (!discovered.await(timeoutMs, TimeUnit.MILLISECONDS) ||
             discoveryStatus != BluetoothGatt.GATT_SUCCESS
         ) {
