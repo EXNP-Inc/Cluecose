@@ -16,6 +16,7 @@ import com.dsikic.cluecose.core.ble.BleFraming
 import com.dsikic.cluecose.core.ble.BleFramingError
 import com.dsikic.cluecose.core.pairing.BleCharRef
 import com.dsikic.cluecose.core.pairing.CommandPairingTransport
+import com.dsikic.cluecose.core.util.Hex
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -134,6 +135,11 @@ class GattSession(
         val deadline: Long,
         @Volatile var result: ByteArray? = null,
         @Volatile var error: Exception? = null,
+        // True once the waiter FINISHED (result full or error). NOT the same
+        // as result != null — for fragmented waits `result` is non-null from
+        // the FIRST chunk onward (mid-accumulation); only `done` marks a
+        // waiter that must not receive further fragments.
+        @Volatile var done: Boolean = false,
         // Per-call seq state (iOS NotifyReassembler.nextExpectedSeq): null
         // until the FIRST fragment of THIS stream is seen (accepted
         // unconditionally), then strict +1. Kept on the waiter — NOT on a
@@ -337,14 +343,13 @@ class GattSession(
         val targetId = characteristic.uuid.toString()
         val waiter = pendingWaiter
 
-        val waiterComplete = waiter != null && (waiter.result != null || waiter.error != null)
-
-        if (waiter != null && waiter.targetId == targetId && !waiterComplete) {
+        if (waiter != null && waiter.targetId == targetId && !waiter.done) {
             if (System.currentTimeMillis() > waiter.deadline) return
             if (waiter.exactly < 0) {
                 // Command/response: the raw value IS the response (a short
                 // 1-byte frame). Zero-length values are skipped by the caller.
                 waiter.result = value
+                waiter.done = true
                 waiter.latch.countDown()
                 return
             }
@@ -371,7 +376,10 @@ class GattSession(
             val deque = securityBuffer.getOrPut(targetId) { ArrayDeque() }
             if (deque.size >= SECURITY_BUFFER_MAX) deque.removeFirst()
             deque.addLast(value)
-            Log.i(TAG, "security notify buffered ($targetId) len=${value.size} buf=${deque.size} (no live waiter)")
+            Log.i(
+                TAG,
+                "security notify BUFFERED (seq=${value[0].toInt() and 0xFF}) hex=${Hex.encode(value)} buf=${deque.size} (no live waiter)",
+            )
             return
         }
 
@@ -397,16 +405,19 @@ class GattSession(
         val expected = waiter.nextSeq
         if (expected != null && seq != expected) {
             waiter.error = BleFramingError.SequenceGap(expected, seq)
+            waiter.done = true
             waiter.latch.countDown()
             return true
         }
         waiter.nextSeq = (seq + 1) and 0xFF
         val chunk = if (value.size > 1) value.copyOfRange(1, value.size) else ByteArray(0)
+        Log.i(TAG, "security notify fed (seq=$seq) hex=${Hex.encode(value)}")
         val existing = waiter.result
         val accumulated = if (existing == null) chunk else existing + chunk
         waiter.result = accumulated
         if (accumulated.size >= waiter.exactly) {
             waiter.result = accumulated.copyOfRange(0, waiter.exactly)
+            waiter.done = true
             waiter.latch.countDown()
             return true
         }
@@ -425,7 +436,7 @@ class GattSession(
         val deque = securityBuffer[targetId] ?: return false
         while (deque.isNotEmpty()) {
             val cur = pendingWaiter
-            if (cur != waiter || cur.result != null || cur.error != null) break
+            if (cur != waiter || cur.done) break
             val value = deque.removeFirst()
             if (feedFragment(targetId, value, waiter)) return true
         }
@@ -483,9 +494,17 @@ class GattSession(
 
         val error = waiter.error
         if (error != null) throw error
-        val result = waiter.result
-        if (result == null) throw GattError.NotifyTimeout(on.name)
-        return result
+        if (!waiter.done) {
+            // Timed out. `result` may be PARTIAL (a few of the exactly bytes
+            // accumulated) — it is NOT a valid frame; the caller treats
+            // NotifyTimeout as a retryable transport failure. Report how
+            // many bytes we did see so the logs can distinguish a slow
+            // stream from a short one.
+            val partial = waiter.result?.size ?: 0
+            Log.w(TAG, "awaitNotify(${on.name}) timed out: $partial/$exactly bytes accumulated")
+            throw GattError.NotifyTimeout(on.name)
+        }
+        return waiter.result!!
     }
 
     /** One command byte to the command/response characteristic. */

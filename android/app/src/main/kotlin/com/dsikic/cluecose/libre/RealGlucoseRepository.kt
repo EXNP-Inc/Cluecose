@@ -404,40 +404,17 @@ class RealGlucoseRepository(
         // The sensor only accepts connections during its short advertising
         // burst (about once a minute). The scanner now ends as soon as the
         // target advertises, but a connect can still miss the window (GATT
-        // 133); rescan + retry a few times before giving up.
+        // 133); rescan + retry a few times before giving up. A HANDSHAKE
+        // failure also retries the whole cycle, not just the connect: the
+        // 65 B cert stream can drop its first frame on a freshly armed link
+        // (observed 16:36: frames 1..6 contiguous, frame 0 lost), and
+        // re-sending GetCertificate on a fresh link re-arms the stream from
+        // frame 0.
         val maxAttempts = 3
         var gatt: GattSession? = null
         var lastError: Throwable? = null
-        for (attempt in 1..maxAttempts) {
-            emit(Event.Status(if (attempt == 1) {
-                "Looking for the sensor… (it opens a connection window about every minute)"
-            } else {
-                "Still waiting for the sensor's connection window… (attempt $attempt/$maxAttempts)"
-            }))
-            val discovered = sensorScanner.scanOnce(target, DISCOVERY_TIMEOUT_MS)
-                ?: throw RealGlucoseError.BleNotFound
-            val device = bluetoothDevice(discovered.address)
-
-            val session = GattSession(app)
-            session.onDisconnected = { code -> onGattDropped(code, session) }
-            this.gatt = session
-            val attemptResult = runCatching { session.connect(device, discovered.name) }
-            if (attemptResult.isSuccess) {
-                gatt = session
-                lastError = null
-                emit(Event.Status("Connected — running the security handshake…"))
-                break
-            } else {
-                val err = attemptResult.exceptionOrNull()
-                lastError = err
-                Log.w(TAG, "connect attempt $attempt/$maxAttempts failed: ${err?.message}")
-                session.disconnect()
-            }
-        }
-        if (gatt == null) {
-            lastError?.let { throw it }
-            throw RealGlucoseError.BleNotFound
-        }
+        var crypto: DataPlaneCrypto? = null
+        var noncePrefix: Int? = null
 
         // ── Handshake choice: cached 0x11 or full 03 03 ─────────────────────
         // The fast cached path reuses the saved Phase-5 key and resumes the
@@ -451,26 +428,62 @@ class RealGlucoseRepository(
         val useCached = allowCached && s.phase5RawKey.size == 16 && backfillReason == null
         Log.i(TAG, "handshake: ${if (useCached) "CACHED (0x11)" else "FULL first-pair (03 03)"} (backfill: ${backfillReason ?: "no"})")
 
-        var crypto: DataPlaneCrypto
-        var noncePrefix: Int?
-        if (useCached) {
-            val cached = runCatching { runCachedReconnect(gatt, blePIN, s.phase5RawKey) }
-            if (cached.isSuccess) {
-                val (c, prefix) = cached.getOrThrow()
-                crypto = c
-                noncePrefix = prefix
+        for (attempt in 1..maxAttempts) {
+            emit(Event.Status(if (attempt == 1) {
+                "Looking for the sensor… (it opens a connection window about every minute)"
             } else {
-                Log.w(TAG, "cached reconnect failed (${cached.exceptionOrNull()?.message}) — full first-pair fallback")
-                val (c, material, prefix) = runFirstPairHandshake(gatt, blePIN)
-                crypto = c
-                s = s.copy(phase5RawKey = material.rawKey)
-                noncePrefix = prefix
+                "Still working on the pairing… (attempt $attempt/$maxAttempts)"
+            }))
+            val discovered = sensorScanner.scanOnce(target, DISCOVERY_TIMEOUT_MS)
+                ?: throw RealGlucoseError.BleNotFound
+            val device = bluetoothDevice(discovered.address)
+
+            val session = GattSession(app)
+            session.onDisconnected = { code -> onGattDropped(code, session) }
+            this.gatt = session
+            val connectResult = runCatching { session.connect(device, discovered.name) }
+            if (connectResult.isFailure) {
+                val err = connectResult.exceptionOrNull()
+                lastError = err
+                Log.w(TAG, "connect attempt $attempt/$maxAttempts failed: ${err?.message}")
+                session.disconnect()
+                continue
             }
-        } else {
-            val (c, material, prefix) = runFirstPairHandshake(gatt, blePIN)
-            crypto = c
-            s = s.copy(phase5RawKey = material.rawKey)
-            noncePrefix = prefix
+            emit(Event.Status("Connected — running the security handshake…"))
+
+            val handshakeResult = runCatching {
+                if (useCached) {
+                    val cached = runCatching { runCachedReconnect(session, blePIN, s.phase5RawKey) }
+                    if (cached.isSuccess) {
+                        val (c, prefix) = cached.getOrThrow()
+                        Triple(c, prefix, s)
+                    } else {
+                        Log.w(TAG, "cached reconnect failed (${cached.exceptionOrNull()?.message}) — full first-pair fallback")
+                        val (c, material, prefix) = runFirstPairHandshake(session, blePIN)
+                        Triple(c, prefix, s.copy(phase5RawKey = material.rawKey))
+                    }
+                } else {
+                    val (c, material, prefix) = runFirstPairHandshake(session, blePIN)
+                    Triple(c, prefix, s.copy(phase5RawKey = material.rawKey))
+                }
+            }
+            if (handshakeResult.isSuccess) {
+                val (c, prefix, updated) = handshakeResult.getOrThrow()
+                gatt = session
+                crypto = c
+                noncePrefix = prefix
+                s = updated
+                break
+            } else {
+                val err = handshakeResult.exceptionOrNull()
+                lastError = err
+                Log.w(TAG, "handshake attempt $attempt/$maxAttempts failed: ${err?.message}")
+                session.disconnect()
+            }
+        }
+        if (gatt == null || crypto == null) {
+            lastError?.let { throw it }
+            throw RealGlucoseError.BleNotFound
         }
 
         // ── Data plane ──────────────────────────────────────────────────────
