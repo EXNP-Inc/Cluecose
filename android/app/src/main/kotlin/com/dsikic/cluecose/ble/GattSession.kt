@@ -109,6 +109,18 @@ class GattSession(
     @Volatile
     private var pendingWaiter: Waiter? = null
 
+    // In-flight write-ACK wait: the characteristic/descriptor whose device
+    // ACK (onCharacteristicWrite/onDescriptorWrite) we are waiting for,
+    // plus its latch. Set by the calling (worker) thread right after the
+    // write is queued, cleared on completion; the GATT executor invokes
+    // ackWrite() on the device ACK, matching by object identity. CCCD
+    // writes are strictly serialized in this session, so a stale/late ACK
+    // can at worst deliver an identical (success) status to the next wait
+    // on the same descriptor — never a false failure.
+    @Volatile private var ackTarget: Any? = null
+    @Volatile private var ackLatch: CountDownLatch? = null
+    @Volatile private var ackStatus = 0
+
     /**
      * Security-channel (cert/challenge) notify buffer: raw (seq-prefixed)
      * notify values for the fragmented security characteristics that arrive
@@ -178,8 +190,11 @@ class GattSession(
 
         val connected = CountDownLatch(1)
         val discovered = CountDownLatch(1)
+        val mtuLatch = CountDownLatch(1)
         var discoveryStatus = BluetoothStatusCodes.ERROR_UNKNOWN
         var connectedStatus = BluetoothStatusCodes.ERROR_UNKNOWN
+        var mtuResult = 0
+        var mtuValue = 0
 
         val callback = object : BluetoothGattCallback() {
             override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
@@ -206,14 +221,25 @@ class GattSession(
                 gattExecutor.execute { handleNotify(characteristic) }
             }
 
-            // Device-side ACK for descriptor (CCCD) writes — the boolean from
-            // writeDescriptor() only means the STACK queued it, not that the
-            // sensor accepted it. status=GATT_SUCCESS(0) here is the truth.
+            override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
+                gattExecutor.execute {
+                    mtuResult = status
+                    mtuValue = mtu
+                    mtuLatch.countDown()
+                }
+            }
+
+            // Device-side ACK for a descriptor (CCCD) write. The boolean from
+            // writeDescriptor() only means the STACK queued it — 17:13 field
+            // run: a CCCD write issued before the connection-parameter update
+            // was settled was never ACKed by the sensor and the framework's
+            // write permit stayed held for 3+ s, failing every subsequent
+            // write. We now wait for THIS callback per CCCD write and fail
+            // fast when the sensor does not ACK.
             override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
                 gattExecutor.execute {
-                    val descUuid = descriptor.uuid?.toString().orEmpty()
-                    val isCccd = descUuid.equals(CCCD.toString(), ignoreCase = true)
-                    Log.i(TAG, "onDescriptorWrite status=$status desc=$descUuid cccd=$isCccd")
+                    Log.i(TAG, "onDescriptorWrite status=$status cccd=${descriptor.uuid.toString().equals(CCCD.toString(), ignoreCase = true)}")
+                    ackWrite(descriptor, status)
                 }
             }
         }
@@ -246,6 +272,27 @@ class GattSession(
         if (!mtuOk) {
             Log.w(TAG, "requestMtu(100) refused — continuing with the default MTU")
         }
+
+        // 17:13 field run: a CCCD write issued while the MTU exchange was
+        // still in flight was never ACKed by the sensor, and the framework
+        // held its GATT write permit open (3+ s of false returns) — every
+        // later write on that link failed. The 16:36 run, where the first
+        // write landed after the connection-parameter update, got ACKs in
+        // ~15 ms. Gate the first writes on the link settling: MTU exchange
+        // resolved + a short settle for the connection-parameter update
+        // (the framework's onConnectionUpdated is not exposed publicly, so
+        // it is covered by the timed settle).
+        if (mtuLatch.await(2_000, TimeUnit.MILLISECONDS)) {
+            Log.i(TAG, "MTU settled: mtu=$mtuValue status=$mtuResult")
+        } else {
+            Log.w(TAG, "MTU exchange did not settle in 2 s — continuing")
+        }
+        try {
+            Thread.sleep(LINK_SETTLE_MS)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+        Log.i(TAG, "link settled — first writes may proceed")
 
         resolveCharacteristics(g)
         Log.i(TAG, "connected + discovered")
@@ -311,6 +358,7 @@ class GattSession(
         val g = gatt
         gatt = null
         failPendingWaiter()
+        failPendingAck()
         if (g != null) {
             runCatching { g.disconnect() }
             runCatching { g.close() }
@@ -322,6 +370,7 @@ class GattSession(
         if (closed) return
         Log.w(TAG, "GATT link dropped status=$status")
         failPendingWaiter()
+        failPendingAck()
         onDataNotify = null
         onDisconnected?.invoke(status)
     }
@@ -647,6 +696,20 @@ class GattSession(
             cccd.value = current
             throw GattError.NotifyEnableFailed(char.uuid.toString(), BluetoothStatusCodes.ERROR_UNKNOWN)
         }
+        // Descriptors DO carry ATT responses (unlike the NO_RESPONSE
+        // security characteristics), so the device ACK here is real and
+        // fast (17 ms observed). A missing/rejected ACK means the
+        // subscription is NOT live — fail now (the caller retries on a
+        // fresh link) instead of letting the framework hold the write
+        // permit open and fail every later write (17:13 field run).
+        try {
+            waitWriteAck(cccd, "$logLabel CCCD")
+        } catch (e: GattError) {
+            // Same rollback: the device never confirmed, so the cached
+            // value is a lie — force the next arm to re-write the CCCD.
+            cccd.value = current
+            throw e
+        }
         Log.i(TAG, "$logLabel ok")
     }
 
@@ -659,6 +722,60 @@ class GattSession(
             cccd.value = BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE
             g.writeDescriptor(cccd)
         }.onFailure { Log.w(TAG, "disable ${char.uuid} failed: ${it.message}") }
+    }
+
+    /**
+     * Invoke [ackWrite] for the in-flight write when the device ACKs it —
+     * GATT executor thread (onCharacteristicWrite / onDescriptorWrite).
+     */
+    private fun ackWrite(item: Any, status: Int) {
+        if (ackTarget !== item) {
+            // Stale/unsolicited ACK (a previous write that was already
+            // timeout-failed, or a write we are not tracking) — log, drop.
+            Log.w(TAG, "write ACK dropped (no wait) status=$status item=${item.javaClass.simpleName}")
+            return
+        }
+        ackStatus = status
+        ackLatch?.countDown()
+    }
+
+    /**
+     * Wait for the device-side ACK of a write that [write] just queued.
+     * The boolean from writeCharacteristic/writeDescriptor is NOT the truth
+     * (the framework returns true while the ATT write is still in flight,
+     * and holds the permit open if the sensor never ACKs — 17:13 run: 3+ s
+     * of false returns killed the whole handshake). A status != GATT_SUCCESS
+     * or a missing ACK within [WRITE_ACK_TIMEOUT_MS] is a real transport
+     * failure the caller can retry (fresh link).
+     */
+    private fun waitWriteAck(item: Any, label: String): Int {
+        ackTarget = item
+        ackStatus = 0
+        val latch = CountDownLatch(1)
+        ackLatch = latch
+        val delivered = latch.await(WRITE_ACK_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        ackTarget = null
+        ackLatch = null
+        if (!delivered) {
+            Log.w(TAG, "$label: no device ACK in ${WRITE_ACK_TIMEOUT_MS} ms — write treated as lost")
+            throw GattError.WriteAckTimeout(label)
+        }
+        val status = ackStatus
+        if (status == ACK_FAILED_SENTINEL) throw GattError.Disconnected(19) // link dropped mid-ACK
+        if (status != BluetoothGatt.GATT_SUCCESS) {
+            throw GattError.WriteFailed(label, status)
+        }
+        return status
+    }
+
+    /** Fail any in-flight write-ACK wait (link dropped / session closed). */
+    private fun failPendingAck() {
+        if (ackTarget != null || ackLatch != null) {
+            ackStatus = ACK_FAILED_SENTINEL
+            ackTarget = null
+            ackLatch?.countDown()
+            ackLatch = null
+        }
     }
 
     /**
@@ -687,7 +804,7 @@ class GattSession(
     }
 
     @SuppressLint("MissingPermission")
-    private fun writeCharSync(char: BluetoothGattCharacteristic, value: ByteArray) {
+    private fun writeCharSync(char: BluetoothGattCharacteristic, value: ByteArray, waitForAck: Boolean = false) {
         val g = gatt ?: throw GattError.NotConnected
         char.value = value
         char.writeType = if (char.properties.and(BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0) {
@@ -699,6 +816,7 @@ class GattSession(
         if (!ok) {
             throw GattError.WriteFailed(char.uuid.toString(), BluetoothStatusCodes.ERROR_UNKNOWN)
         }
+        if (waitForAck) waitWriteAck(char, "write ${char.uuid}")
     }
 
     companion object {
@@ -717,6 +835,22 @@ class GattSession(
         // retries covers the worst observed window with margin.
         private const val WRITE_PERMIT_RETRIES = 120
         private const val WRITE_PERMIT_RETRY_MS = 25L
+        // Device-ACK window for a descriptor (CCCD) write. Observed 17 ms on
+        // healthy links; a missing ACK means the write was lost and the
+        // framework will hold the GATT write permit open — fail at 500 ms
+        // instead of busy-spinning the permit for 3 s (17:13 field run).
+        private const val WRITE_ACK_TIMEOUT_MS = 500L
+        // Settle delay after MTU before the first write. The framework
+        // updates the connection parameters right after connect (observed
+        // interval 6 -> 36 at +130 ms); a CCCD write issued before that
+        // update lands is not ACKed by the sensor (17:13 run). 300 ms
+        // covers the worst observed conn-update latency (~150 ms) with
+        // margin without adding real handshake time.
+        private const val LINK_SETTLE_MS = 300L
+        // Pseudo-status for a write-ACK wait killed by a link drop. Must
+        // be a value the sensor can never report (0x0000–0x0127 are GATT
+        // status codes; use the int max).
+        private const val ACK_FAILED_SENTINEL = Int.MAX_VALUE
         private val CCCD = java.util.UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     }
 }
@@ -734,6 +868,7 @@ sealed class GattError(message: String) : Exception(message) {
     class CharacteristicMissing(val name: String) : GattError("characteristic not resolved: $name")
     class WriteFailed(val uuid: String, val status: Int) : GattError("GATT write failed on $uuid status=$status")
     class NotifyEnableFailed(val uuid: String, val status: Int) : GattError("enable notifications failed on $uuid status=$status")
+    class WriteAckTimeout(val label: String) : GattError("no device ACK for $label — write lost")
     class NoCccd(val uuid: String) : GattError("no CCCD descriptor on $uuid")
     class NotifyTimeout(val name: String) : GattError("timed out waiting for $name notify")
     class CommandResponseTimeout(val seconds: Int) : GattError("timed out waiting for command response after ${seconds}s")
