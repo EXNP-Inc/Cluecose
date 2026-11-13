@@ -19,7 +19,6 @@ import com.dsikic.cluecose.core.pairing.CommandPairingTransport
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * The seven Libre data-plane characteristics (suffix of the full 128-bit
@@ -109,8 +108,18 @@ class GattSession(
     @Volatile
     private var pendingWaiter: Waiter? = null
 
-    /** characteristic UUID string -> next expected 1-byte seq (0 = not started). */
-    private val notifySeq = mutableMapOf<String, AtomicInteger>()
+    /**
+     * Security-channel (cert/challenge) notify buffer: raw (seq-prefixed)
+     * notify values for the fragmented security characteristics that arrive
+     * while NO matching waiter is registered. This becomes possible because
+     * [connect] now arms the cert CCCD eagerly (iOS parity), so the sensor
+     * can stream the 65 B cert during `awaitCommandResponse(0x0a)` — before
+     * `awaitNotify(CERT_HANDSHAKE)` registers. The next `awaitNotify` on the
+     * same characteristic drains it, in order. Bounded per characteristic;
+     * overflow drops the oldest. Only the GATT executor thread touches this
+     * ([handleNotify] and the [awaitNotify] drain both run on it).
+     */
+    private val securityBuffer = mutableMapOf<String, ArrayDeque<ByteArray>>()
 
     /**
      * One blocking notify wait. `exactly > 0`: reassemble seq-prefixed
@@ -125,6 +134,16 @@ class GattSession(
         val deadline: Long,
         @Volatile var result: ByteArray? = null,
         @Volatile var error: Exception? = null,
+        // Per-call seq state (iOS NotifyReassembler.nextExpectedSeq): null
+        // until the FIRST fragment of THIS stream is seen (accepted
+        // unconditionally), then strict +1. Kept on the waiter — NOT on a
+        // shared per-char counter — because the sensor restarts seq at 0
+        // for every stream, and PairingFlow awaits the SAME cert
+        // characteristic twice (65 B sensor cert, then 65 B sensor
+        // ephemeral). A shared counter would desync on the second stream.
+        // Only the GATT executor thread mutates this (feedFragment, from
+        // the live path or the drain).
+        var nextSeq: Int? = null,
     )
 
     // ── Lifecycle ──────────────────────────────────────────────────────────
@@ -148,7 +167,7 @@ class GattSession(
 
         deviceAddress = device.address
         advertisedName = name
-        notifySeq.clear()
+        securityBuffer.clear()
         closed = false
 
         val connected = CountDownLatch(1)
@@ -179,6 +198,17 @@ class GattSession(
 
             override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
                 gattExecutor.execute { handleNotify(characteristic) }
+            }
+
+            // Device-side ACK for descriptor (CCCD) writes — the boolean from
+            // writeDescriptor() only means the STACK queued it, not that the
+            // sensor accepted it. status=GATT_SUCCESS(0) here is the truth.
+            override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+                gattExecutor.execute {
+                    val descUuid = descriptor.uuid?.toString().orEmpty()
+                    val isCccd = descUuid.equals(CCCD.toString(), ignoreCase = true)
+                    Log.i(TAG, "onDescriptorWrite status=$status desc=$descUuid cccd=$isCccd")
+                }
             }
         }
 
@@ -213,6 +243,22 @@ class GattSession(
 
         resolveCharacteristics(g)
         Log.i(TAG, "connected + discovered")
+
+        // iOS parity (SensorSession.didDiscoverCharacteristicsFor): arm
+        // notifications on ALL handshake characteristics immediately, while
+        // discovery is still settling — NOT lazily right before each await.
+        // The sensor can start streaming (e.g. the 65 B cert right after
+        // GetCertificate) before a late CCCD lands; an early subscription is
+        // never torn down, so the cert stream is never missed. A later
+        // enableNotificationsSync on an already-notifying characteristic is a
+        // no-op (same CCCD value).
+        val securityChars = listOfNotNull(certChar, challengeChar, commandChar)
+        for (char in securityChars) {
+            val short = char.uuid.toString().take(8).uppercase()
+            runCatching {
+                enableNotificationsSync(char, "eagerSub($short)")
+            }.onFailure { Log.w(TAG, "eagerSub($short) failed: ${it.message}") }
+        }
     }
 
     private fun resolveCharacteristics(g: BluetoothGatt) {
@@ -291,7 +337,9 @@ class GattSession(
         val targetId = characteristic.uuid.toString()
         val waiter = pendingWaiter
 
-        if (waiter != null && waiter.targetId == targetId) {
+        val waiterComplete = waiter != null && (waiter.result != null || waiter.error != null)
+
+        if (waiter != null && waiter.targetId == targetId && !waiterComplete) {
             if (System.currentTimeMillis() > waiter.deadline) return
             if (waiter.exactly < 0) {
                 // Command/response: the raw value IS the response (a short
@@ -300,29 +348,34 @@ class GattSession(
                 waiter.latch.countDown()
                 return
             }
-            // Security-channel fragment: [seq][chunk].
-            val seq = value[0].toInt() and 0xFF
-            val counter = notifySeq.getOrPut(targetId) { AtomicInteger(0) }
-            val expected = counter.get()
-            if (expected != 0 && seq != expected) {
-                waiter.error = BleFramingError.SequenceGap(expected, seq)
-                waiter.latch.countDown()
-                return
-            }
-            counter.set((seq + 1) and 0xFF)
-            val chunk = if (value.size > 1) value.copyOfRange(1, value.size) else ByteArray(0)
-            val existing = waiter.result
-            val accumulated = if (existing == null) chunk else existing + chunk
-            waiter.result = accumulated
-            if (accumulated.size >= waiter.exactly) {
-                waiter.result = accumulated.copyOfRange(0, waiter.exactly)
-                waiter.latch.countDown()
-            }
+            feedFragment(targetId, value, waiter)
             return
         }
 
-        // No pairing waiter (or a different characteristic): post-auth
-        // data-plane frame → hand to the listener.
+        // No live (incomplete) waiter for this characteristic: either no
+        // waiter at all, or one that already completed on a different
+        // characteristic / an earlier stream. For the fragmented SECURITY
+        // characteristics (cert/challenge — NOT the command char, whose
+        // notifies are always consumed by a live command-response waiter)
+        // buffer the raw notify for the next awaitNotify on it. Eager
+        // subscribe (connect) can make the sensor start streaming the 65 B
+        // cert before the cert waiter is registered, and the SAME cert char
+        // carries a second 65 B stream (sensor ephemeral) right after the
+        // first is consumed — a late chunk for the finished stream must
+        // buffer, not poison the next waiter. The seq state lives on the
+        // waiter that DRAINS it, so an early stream cannot desync a later
+        // one.
+        val isSecurity = targetId == certChar?.uuid?.toString() ||
+            targetId == challengeChar?.uuid?.toString()
+        if (isSecurity) {
+            val deque = securityBuffer.getOrPut(targetId) { ArrayDeque() }
+            if (deque.size >= SECURITY_BUFFER_MAX) deque.removeFirst()
+            deque.addLast(value)
+            Log.i(TAG, "security notify buffered ($targetId) len=${value.size} buf=${deque.size} (no live waiter)")
+            return
+        }
+
+        // Post-auth data-plane frame → hand to the listener.
         val ref = dataChars.entries.firstOrNull { it.value.uuid.toString() == targetId }?.key ?: return
         val sink = onDataNotify
         if (sink == null) {
@@ -330,6 +383,53 @@ class GattSession(
             return
         }
         sink(ref, value)
+    }
+
+    /**
+     * Feed one seq-prefixed security-channel fragment ([seq][chunk]) into
+     * [waiter]: advance the per-characteristic seq counter and accumulate
+     * payload bytes. Returns true when [waiter] is finished (exactly
+     * accumulated, or a seq-gap error was latched). Only the GATT executor
+     * thread calls this (from [handleNotify] live, or from [drainBuffered]).
+     */
+    private fun feedFragment(targetId: String, value: ByteArray, waiter: Waiter): Boolean {
+        val seq = value[0].toInt() and 0xFF
+        val expected = waiter.nextSeq
+        if (expected != null && seq != expected) {
+            waiter.error = BleFramingError.SequenceGap(expected, seq)
+            waiter.latch.countDown()
+            return true
+        }
+        waiter.nextSeq = (seq + 1) and 0xFF
+        val chunk = if (value.size > 1) value.copyOfRange(1, value.size) else ByteArray(0)
+        val existing = waiter.result
+        val accumulated = if (existing == null) chunk else existing + chunk
+        waiter.result = accumulated
+        if (accumulated.size >= waiter.exactly) {
+            waiter.result = accumulated.copyOfRange(0, waiter.exactly)
+            waiter.latch.countDown()
+            return true
+        }
+        return false
+    }
+
+    /**
+     * Drain [targetId]'s buffered security fragments into [waiter], in order,
+     * as if they had arrived live. Only the GATT executor thread calls this —
+     * the drain loop re-reads [pendingWaiter] each iteration, so a live
+     * notify that interleaves on the same single-thread executor (FIFO) is
+     * fed live and the buffered remainder stays for the next drain. Returns
+     * true when [waiter] is satisfied (or errored).
+     */
+    private fun drainBuffered(targetId: String, waiter: Waiter): Boolean {
+        val deque = securityBuffer[targetId] ?: return false
+        while (deque.isNotEmpty()) {
+            val cur = pendingWaiter
+            if (cur != waiter || cur.result != null || cur.error != null) break
+            val value = deque.removeFirst()
+            if (feedFragment(targetId, value, waiter)) return true
+        }
+        return false
     }
 
     // ── PairingTransport (security channel) ────────────────────────────────
@@ -352,7 +452,6 @@ class GattSession(
     override fun awaitNotify(on: BleCharRef, exactly: Int): ByteArray {
         val char = charFor(on) ?: throw GattError.CharacteristicMissing(on.name)
         val targetId = char.uuid.toString()
-        notifySeq.getOrPut(targetId) { AtomicInteger(0) }
 
         val latch = CountDownLatch(1)
         val waiter = Waiter(targetId, exactly, latch, System.currentTimeMillis() + FRAGMENT_TIMEOUT_MS)
@@ -361,6 +460,20 @@ class GattSession(
         // Enable notifications for the duration of the wait (idempotent — the
         // sensor keeps the CCCD state across re-arms; later calls are no-ops).
         enableNotificationsSync(char, "awaitNotify(${on.name})")
+
+        // Consume fragments that streamed in before the waiter existed
+        // (possible because the cert CCCD is armed eagerly in connect).
+        // The drain MUST run on the GATT executor thread — it touches
+        // securityBuffer and waiter seq/result state, which the executor
+        // owns (handleNotify feeds the same state live). Posting it here
+        // (after the CCCD write) serializes the drain FIFO with any live
+        // notifies: a notify arriving mid-drain is enqueued behind this
+        // task and is either fed live (if the waiter is still registered
+        // when it runs) or left buffered (if the drain finished the
+        // waiter first) — never lost, never double-fed.
+        gattExecutor.execute {
+            drainBuffered(targetId, waiter)
+        }
 
         val deadline = waiter.deadline
         while (System.currentTimeMillis() < deadline) {
@@ -496,9 +609,23 @@ class GattSession(
         } else {
             BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
         }
+        // iOS parity (SensorSession: `if chr.isNotifying { skip }`): the CCCD
+        // is armed exactly ONCE per characteristic — the eager arm in
+        // connect(). Re-writing an already-armed CCCD is at best a no-op and
+        // at worst a pipeline reset mid-handshake, so when our cached value
+        // already equals the desired one, skip the write entirely. (A null
+        // cache — the first arm after connect — always writes.)
+        val current = cccd.value
+        if (current != null && current.contentEquals(value)) {
+            Log.i(TAG, "$logLabel already armed — skipping CCCD write")
+            return
+        }
         cccd.value = value
         val ok = awaitWritePermit(g, "$logLabel CCCD") { g.writeDescriptor(cccd) }
         if (!ok) {
+            // Roll back the cache: the write was never sent, so the next
+            // caller must not see "already armed" and skip its own write.
+            cccd.value = current
             throw GattError.NotifyEnableFailed(char.uuid.toString(), BluetoothStatusCodes.ERROR_UNKNOWN)
         }
         Log.i(TAG, "$logLabel ok")
@@ -559,6 +686,10 @@ class GattSession(
         private const val TAG = "CluecoseGatt"
         private const val FRAGMENT_TIMEOUT_MS = 10_000L
         private const val STRAY_SKIP_LIMIT = 5
+        // Per-characteristic cap on buffered (unwaited) security notifies.
+        // The cert stream is 4 chunks at MTU 23; the ephemeral challenge
+        // stream is the same shape — 16 is a comfortable 4× headroom.
+        private const val SECURITY_BUFFER_MAX = 16
         // GATT write-permit retry: the framework returns false (permit busy)
         // for up to ~500 ms right after connect + connection-parameter update
         // (Samsung quirk). 20 x 25 ms = up to 500 ms of bounded retries.
