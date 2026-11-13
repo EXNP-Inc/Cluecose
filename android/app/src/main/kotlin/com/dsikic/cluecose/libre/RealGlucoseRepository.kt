@@ -15,6 +15,7 @@ import com.dsikic.cluecose.ble.DataPlaneListener
 import com.dsikic.cluecose.ble.GattSession
 import com.dsikic.cluecose.ble.SensorScanner
 import com.dsikic.cluecose.ble.SensorScanError
+import com.dsikic.cluecose.core.crypto.FirstPairConfig
 import com.dsikic.cluecose.core.dataplane.DataPlaneCrypto
 import com.dsikic.cluecose.core.dataplane.DataPlanePacketKind
 import com.dsikic.cluecose.core.dataplane.DataPlaneDecodedPacket
@@ -100,6 +101,16 @@ class RealGlucoseRepository(
 
     private val sensorScanner = SensorScanner(app)
     private val sessionKeyInstance = SessionKey(Phase5KeySchedule(tablesSource))
+
+    init {
+        // Install the vendored runtime tables into the object-level seam the
+        // first-pair VM (builder633fa8 / native-ephemeral generation) reads.
+        // `:core` JVM tests install their own ClasspathTablesSource; the app
+        // installs the APK assets. Idempotent — a test-provided source wins.
+        if (FirstPairConfig.tablesSource == null) {
+            FirstPairConfig.tablesSource = tablesSource
+        }
+    }
 
     // MARK: Worker / lifecycle flags
 
