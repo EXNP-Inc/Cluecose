@@ -108,6 +108,11 @@ class SensorScanner(context: Context) {
         val best = java.util.concurrent.ConcurrentHashMap<String, DiscoveredSensor>()
         val latch = CountDownLatch(1)
 
+        // NFC-pair target: connect the MOMENT it advertises — the sensor only
+        // accepts connections during its short advertising burst, so a full
+        // 75 s wait (the old behavior) always hit the closed window (GATT 133).
+        val targetNorm = normalizedAddress(targetName)
+
         val callback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult?) {
                 val r = result ?: return
@@ -118,6 +123,12 @@ class SensorScanner(context: Context) {
                 if (prev == null || hit.rssi > prev.rssi) {
                     best[r.device.address] = hit
                     Log.i(TAG, "scan hit: $name @ ${r.device.address} rssi=${r.rssi}")
+                }
+                if (targetNorm != null &&
+                    (normalizedAddress(hit.name) == targetNorm || normalizedAddress(hit.address) == targetNorm)
+                ) {
+                    Log.i(TAG, "scan matched target ${hit.address} — ending scan early")
+                    latch.countDown()
                 }
             }
 
@@ -148,7 +159,6 @@ class SensorScanner(context: Context) {
         // Prefer the NFC-reported target (hex-only, case-insensitive compare,
         // iOS `normalizedBLEAddress`); the sensor advertises its address as
         // the name, so compare against both name and MAC.
-        val targetNorm = normalizedAddress(targetName)
         if (targetNorm != null) {
             for (hit in best.values) {
                 if (normalizedAddress(hit.name) == targetNorm || normalizedAddress(hit.address) == targetNorm) {

@@ -387,18 +387,46 @@ class RealGlucoseRepository(
         allowCached: Boolean,
     ) {
         var s = newSessionState
-        emit(Event.Status("Looking for the sensor… (it opens a connection window about every minute)"))
 
         val target = sensorScanner.normalizedAddress(bleAddress)
-        val discovered = sensorScanner.scanOnce(target, DISCOVERY_TIMEOUT_MS)
-            ?: throw RealGlucoseError.BleNotFound
-        val device = bluetoothDevice(discovered.address)
 
-        val gatt = GattSession(app)
-        gatt.onDisconnected = { code -> onGattDropped(code, gatt) }
-        this.gatt = gatt
-        emit(Event.Status("Connected — running the security handshake…"))
-        gatt.connect(device, discovered.name) // on failure the caller's catch → teardownSession()
+        // The sensor only accepts connections during its short advertising
+        // burst (about once a minute). The scanner now ends as soon as the
+        // target advertises, but a connect can still miss the window (GATT
+        // 133); rescan + retry a few times before giving up.
+        val maxAttempts = 3
+        var gatt: GattSession? = null
+        var lastError: Throwable? = null
+        for (attempt in 1..maxAttempts) {
+            emit(Event.Status(if (attempt == 1) {
+                "Looking for the sensor… (it opens a connection window about every minute)"
+            } else {
+                "Still waiting for the sensor's connection window… (attempt $attempt/$maxAttempts)"
+            }))
+            val discovered = sensorScanner.scanOnce(target, DISCOVERY_TIMEOUT_MS)
+                ?: throw RealGlucoseError.BleNotFound
+            val device = bluetoothDevice(discovered.address)
+
+            val session = GattSession(app)
+            session.onDisconnected = { code -> onGattDropped(code, session) }
+            this.gatt = session
+            val attemptResult = runCatching { session.connect(device, discovered.name) }
+            if (attemptResult.isSuccess) {
+                gatt = session
+                lastError = null
+                emit(Event.Status("Connected — running the security handshake…"))
+                break
+            } else {
+                val err = attemptResult.exceptionOrNull()
+                lastError = err
+                Log.w(TAG, "connect attempt $attempt/$maxAttempts failed: ${err?.message}")
+                session.disconnect()
+            }
+        }
+        if (gatt == null) {
+            lastError?.let { throw it }
+            throw RealGlucoseError.BleNotFound
+        }
 
         // ── Handshake choice: cached 0x11 or full 03 03 ─────────────────────
         // The fast cached path reuses the saved Phase-5 key and resumes the
