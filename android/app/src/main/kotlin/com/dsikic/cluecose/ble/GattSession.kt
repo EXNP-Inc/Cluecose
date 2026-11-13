@@ -497,7 +497,7 @@ class GattSession(
             BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
         }
         cccd.value = value
-        val ok = g.writeDescriptor(cccd)
+        val ok = awaitWritePermit(g, "$logLabel CCCD") { g.writeDescriptor(cccd) }
         if (!ok) {
             throw GattError.NotifyEnableFailed(char.uuid.toString(), BluetoothStatusCodes.ERROR_UNKNOWN)
         }
@@ -515,6 +515,31 @@ class GattSession(
         }.onFailure { Log.w(TAG, "disable ${char.uuid} failed: ${it.message}") }
     }
 
+    /**
+     * GATT write-permit retry. The framework returns `false` from
+     * `writeCharacteristic`/`writeDescriptor` when it cannot acquire the
+     * GATT write permit — most commonly right after connect, while the
+     * connection-parameter update is still in flight (Samsung quirk,
+     * observed 14:46:53: permit busy 500 ms after discovery). The device
+     * did NOT reject the write; the permit frees up in milliseconds, so
+     * retry with a short backoff. Bounded — the PairingFlow per-write
+     * wall-clock budget is the outer limit.
+     */
+    private fun awaitWritePermit(g: BluetoothGatt, label: String, write: () -> Boolean): Boolean {
+        var attempt = 0
+        while (true) {
+            if (write()) return true
+            attempt += 1
+            if (attempt >= WRITE_PERMIT_RETRIES) return false
+            Log.w(TAG, "$label: GATT write permit busy (attempt $attempt/$WRITE_PERMIT_RETRIES) — retrying")
+            try {
+                Thread.sleep(WRITE_PERMIT_RETRY_MS)
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }
+    }
+
     @SuppressLint("MissingPermission")
     private fun writeCharSync(char: BluetoothGattCharacteristic, value: ByteArray) {
         val g = gatt ?: throw GattError.NotConnected
@@ -524,7 +549,7 @@ class GattSession(
         } else {
             BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
         }
-        val ok = g.writeCharacteristic(char)
+        val ok = awaitWritePermit(g, "write ${char.uuid}") { g.writeCharacteristic(char) }
         if (!ok) {
             throw GattError.WriteFailed(char.uuid.toString(), BluetoothStatusCodes.ERROR_UNKNOWN)
         }
@@ -534,6 +559,11 @@ class GattSession(
         private const val TAG = "CluecoseGatt"
         private const val FRAGMENT_TIMEOUT_MS = 10_000L
         private const val STRAY_SKIP_LIMIT = 5
+        // GATT write-permit retry: the framework returns false (permit busy)
+        // for up to ~500 ms right after connect + connection-parameter update
+        // (Samsung quirk). 20 x 25 ms = up to 500 ms of bounded retries.
+        private const val WRITE_PERMIT_RETRIES = 20
+        private const val WRITE_PERMIT_RETRY_MS = 25L
         private val CCCD = java.util.UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     }
 }
