@@ -710,9 +710,12 @@ class GattSession(
         // stream is the same shape — 16 is a comfortable 4× headroom.
         private const val SECURITY_BUFFER_MAX = 16
         // GATT write-permit retry: the framework returns false (permit busy)
-        // for up to ~500 ms right after connect + connection-parameter update
-        // (Samsung quirk). 20 x 25 ms = up to 500 ms of bounded retries.
-        private const val WRITE_PERMIT_RETRIES = 20
+        // while a prior write's ACK is outstanding. The first post-connect
+        // CCCD write opens a window that lasts until the sensor ACKs it —
+        // observed 18 ms … 1.5 s (17:06 field run: every write after the
+        // cert CCCD was busy for 1.5 s+). 120 x 25 ms = 3 s of bounded
+        // retries covers the worst observed window with margin.
+        private const val WRITE_PERMIT_RETRIES = 120
         private const val WRITE_PERMIT_RETRY_MS = 25L
         private val CCCD = java.util.UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     }
