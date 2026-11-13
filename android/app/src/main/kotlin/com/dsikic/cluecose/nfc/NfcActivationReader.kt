@@ -116,8 +116,47 @@ class NfcActivationReader(activity: Activity) {
         }
     }
 
-    /** True when the device has an enabled NFC adapter (reader mode usable). */
-    fun isAvailable(): Boolean = adapter?.isEnabled == true
+    /**
+     * True when the device has an enabled NFC adapter (reader mode usable).
+     *
+     * On the Sony G3223 (API 26) the constructor's
+     * `getSystemService(NFC_SERVICE)` returned null while the NFC service was
+     * clearly up (`dumpsys nfc` → `mState=on`, `mEnableReader` toggleable), so
+     * this resolves through [resolveAdapter] (which falls back to the canonical
+     * `NfcAdapter.getDefaultAdapter` static) instead of trusting the cached
+     * proxy. If even the fallback is null, the diagnostic log records the
+     * permission grant + uid + feature flag for the next field report.
+     */
+    fun isAvailable(): Boolean {
+        val a = resolveAdapter()
+        if (a == null) {
+            // Diagnostic: the Sony G3223 (API 26) returned a NULL adapter from
+            // `getSystemService(NFC_SERVICE)` even though `dumpsys package`
+            // showed `android.permission.NFC: granted=true` and `dumpsys nfc`
+            // showed `mState=on`. Log the permission + a fresh static lookup
+            // to learn exactly what the app process can see.
+            val perm = activity.checkSelfPermission(android.Manifest.permission.NFC)
+            val fresh = NfcAdapter.getDefaultAdapter(activity)
+            Log.w(
+                TAG,
+                "isAvailable: adapter NULL. checkSelfPermission(NFC)=${perm == android.content.pm.PackageManager.PERMISSION_GRANTED} " +
+                    "uid=${activity.applicationInfo.uid} getDefaultAdapter()==null=${fresh == null} " +
+                    "hasSystemFeatureNfc=${activity.packageManager.hasSystemFeature("android.hardware.nfc")}",
+            )
+            return false
+        }
+        return a.isEnabled
+    }
+
+    /**
+     * The NfcAdapter, preferring the proxy cached at construction but falling
+     * back to the canonical `getDefaultAdapter` static — on the Sony the
+     * `getSystemService(NFC_SERVICE)` call returned null while the service was
+     * clearly up.
+     */
+    private fun resolveAdapter(): NfcAdapter? =
+        adapter?.takeIf { it != null }
+            ?: NfcAdapter.getDefaultAdapter(activity)
 
     /**
      * Arm reader mode for one exchange with this receiver ID. Safe to call
@@ -125,8 +164,10 @@ class NfcActivationReader(activity: Activity) {
      * [onComplete] must be set beforehand.
      */
     fun start(receiverId: Int) {
-        val a = adapter ?: throw Failure.ReaderUnavailable
-        if (!a.isEnabled) throw Failure.ReaderUnavailable
+        // Prefer the cached proxy, fall back to the canonical static lookup
+        // (the Sony G3223 returned null from `getSystemService(NFC_SERVICE)`
+        // while the NFC service was up).
+        val a = resolveAdapter()?.takeIf { it.isEnabled } ?: throw Failure.ReaderUnavailable
         session += 1
         this.receiverId = receiverId
         stopped = false
