@@ -53,10 +53,10 @@ class DataPlaneListener(private val crypto: DataPlaneCrypto) {
      * (install as [GattSession.onDataNotify]).
      */
     fun feed(ref: DataCharRef, fragment: ByteArray, sink: PacketSink?, receivedAt: Long = System.currentTimeMillis()) {
-        val channel = DataPlaneChannel.fromUuidString(ref.uuidSuffix) ?: return
+        val channel = DataPlaneChannel.fromUuidString(ref.uuidPrefix) ?: return
         if (!firstNotifyLogged) {
             firstNotifyLogged = true
-            Log.i(TAG, "LISTENER first notify on ${ref.uuidSuffix} (${fragment.size}B)")
+            Log.i(TAG, "LISTENER first notify on ${ref.uuidPrefix} (${fragment.size}B)")
         }
         val frameRaw = assembler.feed(fragment, channel) ?: return // buffered glucose prefix
         try {
@@ -71,7 +71,7 @@ class DataPlaneListener(private val crypto: DataPlaneCrypto) {
         } catch (e: Exception) {
             decryptFailures += 1
             if (decryptFailures == 1 || decryptFailures % 25 == 0) {
-                Log.w(TAG, "LISTENER decrypt failure #$decryptFailures on ${ref.uuidSuffix}: ${e.message}")
+                Log.w(TAG, "LISTENER decrypt failure #$decryptFailures on ${ref.uuidPrefix}: ${e.message}")
             }
         }
     }

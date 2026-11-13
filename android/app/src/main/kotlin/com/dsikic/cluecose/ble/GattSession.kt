@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * Suffix match at runtime because [GattSession] resolves characteristics
  * from the discovered service table.
  */
-enum class DataCharRef(val uuidSuffix: String) {
+enum class DataCharRef(val uuidPrefix: String) {
     PATCH_CONTROL("08981338"),
     PATCH_STATUS("08981482"),
     GLUCOSE_DATA("0898177A"),
@@ -227,15 +227,17 @@ class GattSession(
 
             if (uuid.startsWith(LibreGattUuids.SECURITY_SERVICE_PREFIX)) {
                 // Security service: the cert / challenge / command
-                // characteristics (UUID suffixes observed in the pairing
-                // captures; the spec's handle-based mapping is superseded).
-                certChar = chars.firstOrNull { it.uuid.toString().uppercase().endsWith("089823FA") }
-                challengeChar = chars.firstOrNull { it.uuid.toString().uppercase().endsWith("089822CE") }
-                commandChar = chars.firstOrNull { it.uuid.toString().uppercase().endsWith("08982198") }
+                // characteristics. The Libre short code (first 8 hex digits)
+                // is the LEADING prefix of the full 128-bit UUID (all share
+                // the EF89-11E9-81B4-2A2AE2DBCCE4 tail), so match startsWith —
+                // UUID.toString() ends in the tail, never the short code.
+                certChar = chars.firstOrNull { it.uuid.toString().uppercase().startsWith("089823FA") }
+                challengeChar = chars.firstOrNull { it.uuid.toString().uppercase().startsWith("089822CE") }
+                commandChar = chars.firstOrNull { it.uuid.toString().uppercase().startsWith("08982198") }
             }
 
             for (ref in DataCharRef.entries) {
-                val char = chars.firstOrNull { it.uuid.toString().uppercase().endsWith(ref.uuidSuffix) }
+                val char = chars.firstOrNull { it.uuid.toString().uppercase().startsWith(ref.uuidPrefix) }
                 if (char != null) dataChars[ref] = char
             }
         }
