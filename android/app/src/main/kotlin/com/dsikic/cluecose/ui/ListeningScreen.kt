@@ -194,7 +194,12 @@ fun ListeningScreen(
                 }
             }
 
-            // Start scanning (green action, iOS button style).
+            // Primary action. Unpaired, the only first-pair path is the NFC
+            // tap — a bare BLE scan can't pair without the 4-byte PIN the tag
+            // provides (iOS: the unpaired CTA is "Pair sensor" → model.pair()).
+            // So the primary green button IS the NFC pairing; "Start scanning"
+            // (stored-MAC reconnect) only exists once a sensor is paired.
+            val paired = state.sensorName != null
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -203,46 +208,74 @@ fun ListeningScreen(
                         shape = RoundedCornerShape(16.dp),
                     )
                     .padding(vertical = 12.dp)
-                    .clickable(onClickLabel = null) { onStart() },
+                    .clickable(onClickLabel = null) {
+                        if (paired) onStart() else onNfc()
+                    },
                 contentAlignment = Alignment.Center,
             ) {
-                Text(
-                    text = "Start scanning",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 15.sp,
-                    color = Color(0xFF04150C),
-                )
+                if (paired) {
+                    Text(
+                        text = "Start scanning",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 15.sp,
+                        color = Color(0xFF04150C),
+                    )
+                } else {
+                    Row(
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Nfc,
+                            contentDescription = null,
+                            tint = Color(0xFF04150C),
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Pair with NFC tap",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 15.sp,
+                            color = Color(0xFF04150C),
+                        )
+                    }
+                }
             }
 
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        CluecoseColors.white(0.12f),
-                        shape = RoundedCornerShape(100.dp),
-                    )
-                    .padding(vertical = 9.dp)
-                    .clickable(onClickLabel = null) { onNfc() },
-                contentAlignment = Alignment.Center,
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically,
+            // Paired but not connected: keep the NFC path as the secondary
+            // "re-pair" (iOS Settings → "Re-pair with NFC tap").
+            if (paired) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            CluecoseColors.white(0.12f),
+                            shape = RoundedCornerShape(100.dp),
+                        )
+                        .padding(vertical = 9.dp)
+                        .clickable(onClickLabel = null) { onNfc() },
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.Nfc,
-                        contentDescription = null,
-                        tint = CluecoseColors.TextPrimary,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Pair with NFC tap",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = CluecoseColors.TextPrimary,
-                    )
+                    Row(
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Nfc,
+                            contentDescription = null,
+                            tint = CluecoseColors.TextPrimary,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Re-pair with NFC tap",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = CluecoseColors.TextPrimary,
+                        )
+                    }
                 }
             }
         }
