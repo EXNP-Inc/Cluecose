@@ -327,7 +327,7 @@ class RealGlucoseRepository(
         // the realtime stream cannot fill, run the full 03 03.
         val backfillReason = backfillNeededReason()
         val useCached = allowCached && s.phase5RawKey.size == 16 && backfillReason == null
-        Log.d(TAG, "handshake: ${if (useCached) "CACHED (0x11)" else "FULL first-pair (03 03)"} (backfill: ${backfillReason ?: "no"})")
+        Log.i(TAG, "handshake: ${if (useCached) "CACHED (0x11)" else "FULL first-pair (03 03)"} (backfill: ${backfillReason ?: "no"})")
 
         var crypto: DataPlaneCrypto
         var noncePrefix: Int?
@@ -455,7 +455,7 @@ class RealGlucoseRepository(
         if (!backfillNeeded) {
             // Fast-path reconnect: no hole to fill. The reference never issues
             // backfill commands on a cached reconnect — just stream.
-            Log.d(TAG, "backfill: skipped (no gap — data complete)")
+            Log.i(TAG, "backfill: skipped (no gap — data complete)")
             emit(Event.Status("Live — readings update about once a minute."))
             return
         }
@@ -479,7 +479,7 @@ class RealGlucoseRepository(
                 )
                 gatt.writeData(frame.raw, DataCharRef.PATCH_CONTROL)
                 sequence += 1
-                Log.d(TAG, "backfill: historical request sent (10-min overlap, from lc $fromLC)")
+                Log.i(TAG, "backfill: historical request sent (10-min overlap, from lc $fromLC)")
             } catch (e: Exception) {
                 Log.w(TAG, "backfill: historical request rejected: ${e.message}")
             }
@@ -490,7 +490,7 @@ class RealGlucoseRepository(
                 if (gotPages && System.currentTimeMillis() - listener.lastHistoricalPageAtValue >= quietMs) break
                 Thread.sleep(250)
             }
-            Log.d(TAG, "backfill: historical wait over — ${listener.historicalPageCountValue} pages total (+${listener.historicalPageCountValue - pagesBefore})")
+            Log.i(TAG, "backfill: historical wait over — ${listener.historicalPageCountValue} pages total (+${listener.historicalPageCountValue - pagesBefore})")
         } catch (e: Exception) {
             Log.w(TAG, "backfill: historical FAILED: ${e.message}")
         }
@@ -514,7 +514,7 @@ class RealGlucoseRepository(
                 if (got && System.currentTimeMillis() - listener.lastClinicalRecordAtValue >= quietMs) break
                 Thread.sleep(250)
             }
-            Log.d(TAG, "backfill: clinical wait over — ${listener.clinicalRecordCountValue} records total (+${listener.clinicalRecordCountValue - recordsBefore})")
+            Log.i(TAG, "backfill: clinical wait over — ${listener.clinicalRecordCountValue} records total (+${listener.clinicalRecordCountValue - recordsBefore})")
         } catch (e: Exception) {
             Log.w(TAG, "backfill: clinical CCCD FAILED: ${e.message}")
         }
@@ -649,7 +649,7 @@ class RealGlucoseRepository(
         } else if (reconnectAttempt == 5) {
             emit(Event.Status("Still searching for the sensor — trying every 30 s…"))
         }
-        Log.d(TAG, "scheduleReconnect #$reconnectAttempt in $delaySec s")
+        Log.i(TAG, "scheduleReconnect #$reconnectAttempt in $delaySec s")
         worker.schedule({
             if (cancelled || gen != generation || linkActive) return@schedule
             val saved = state

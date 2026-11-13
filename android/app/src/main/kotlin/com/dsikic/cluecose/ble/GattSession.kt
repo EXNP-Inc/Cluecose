@@ -182,7 +182,7 @@ class GattSession(
             }
         }
 
-        Log.d(TAG, "connect ${device.address} (name=$name)")
+        Log.i(TAG, "connect ${device.address} (name=$name)")
         val g = device.connectGatt(context, false, callback) ?: throw GattError.ConnectFailed("connectGatt returned null")
         gatt = g
 
@@ -206,7 +206,7 @@ class GattSession(
         }
 
         resolveCharacteristics(g)
-        Log.d(TAG, "connected + discovered")
+        Log.i(TAG, "connected + discovered")
     }
 
     private fun resolveCharacteristics(g: BluetoothGatt) {
@@ -493,7 +493,7 @@ class GattSession(
         if (!ok) {
             throw GattError.NotifyEnableFailed(char.uuid.toString(), BluetoothStatusCodes.ERROR_UNKNOWN)
         }
-        Log.d(TAG, "$logLabel ok")
+        Log.i(TAG, "$logLabel ok")
     }
 
     @SuppressLint("MissingPermission")

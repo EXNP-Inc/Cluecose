@@ -99,7 +99,7 @@ class NfcActivationReader(activity: Activity) {
             val mySession = session
             if (stopped || inFlight) return
             inFlight = true
-            Log.d(TAG, "tag discovered — running patch-info + activation exchange")
+            Log.i(TAG, "tag discovered — running patch-info + activation exchange")
             Thread({
                 try {
                     performExchange(tag, mySession)
@@ -176,7 +176,7 @@ class NfcActivationReader(activity: Activity) {
         main.post {
             try {
                 a.enableReaderMode(activity, readerCallback, READER_FLAGS, null)
-                Log.d(TAG, "reader mode armed receiverId=0x${receiverId.toString(16)}")
+                Log.i(TAG, "reader mode armed receiverId=0x${receiverId.toString(16)}")
             } catch (e: Exception) {
                 Log.w(TAG, "enableReaderMode failed: ${e.message}")
                 report(null, Failure.ReaderUnavailable, session)
@@ -206,9 +206,9 @@ class NfcActivationReader(activity: Activity) {
     private fun performExchange(tag: Tag, mySession: Int) {
         val nfcV = NfcV.get(tag) ?: throw Failure.TagNotIso15693
         val patchInfo = readPatchInfo(nfcV)
-        Log.d(TAG, "patch info ok: serial=${patchInfo.serialNumber} state=0x${patchInfo.stateByte.toString(16)} cmd=${patchInfo.recommendedCommandCode}")
+        Log.i(TAG, "patch info ok: serial=${patchInfo.serialNumber} state=0x${patchInfo.stateByte.toString(16)} cmd=${patchInfo.recommendedCommandCode}")
         val activation = activateOrSwitch(nfcV, patchInfo, receiverId)
-        Log.d(TAG, "activation ok: ble=${activation.bleAddressDisplay} timeRaw=${activation.activationTimeRaw.size}B")
+        Log.i(TAG, "activation ok: ble=${activation.bleAddressDisplay} timeRaw=${activation.activationTimeRaw.size}B")
         inFlight = false
         report(PairingResult(patchInfo, activation), null, mySession)
     }

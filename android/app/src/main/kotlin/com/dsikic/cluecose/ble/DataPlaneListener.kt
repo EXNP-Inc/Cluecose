@@ -56,7 +56,7 @@ class DataPlaneListener(private val crypto: DataPlaneCrypto) {
         val channel = DataPlaneChannel.fromUuidString(ref.uuidSuffix) ?: return
         if (!firstNotifyLogged) {
             firstNotifyLogged = true
-            Log.d(TAG, "LISTENER first notify on ${ref.uuidSuffix} (${fragment.size}B)")
+            Log.i(TAG, "LISTENER first notify on ${ref.uuidSuffix} (${fragment.size}B)")
         }
         val frameRaw = assembler.feed(fragment, channel) ?: return // buffered glucose prefix
         try {
@@ -64,7 +64,7 @@ class DataPlaneListener(private val crypto: DataPlaneCrypto) {
             val packet = decoder.decrypt(frame, channel)
             if (!firstFrameLogged) {
                 firstFrameLogged = true
-                Log.d(TAG, "LISTENER first decrypted frame: channel=$channel kind=${packet.kind} payload=${payloadName(packet.payload)}")
+                Log.i(TAG, "LISTENER first decrypted frame: channel=$channel kind=${packet.kind} payload=${payloadName(packet.payload)}")
             }
             trackBackfillCounters(packet, receivedAt)
             sink?.onPacket(packet, receivedAt)

@@ -117,7 +117,7 @@ class SensorScanner(context: Context) {
                 val prev = best[r.device.address]
                 if (prev == null || hit.rssi > prev.rssi) {
                     best[r.device.address] = hit
-                    Log.d(TAG, "scan hit: $name @ ${r.device.address} rssi=${r.rssi}")
+                    Log.i(TAG, "scan hit: $name @ ${r.device.address} rssi=${r.rssi}")
                 }
             }
 
@@ -126,7 +126,7 @@ class SensorScanner(context: Context) {
             }
         }
 
-        Log.d(TAG, "scan start target=${targetName ?: "any"} for ${timeoutMs} ms")
+        Log.i(TAG, "scan start target=${targetName ?: "any"} for ${timeoutMs} ms")
         try {
             scanner.startScan(listOf(filter), settings, callback)
         } catch (e: SecurityException) {
@@ -152,11 +152,11 @@ class SensorScanner(context: Context) {
         if (targetNorm != null) {
             for (hit in best.values) {
                 if (normalizedAddress(hit.name) == targetNorm || normalizedAddress(hit.address) == targetNorm) {
-                    Log.d(TAG, "scan matched target ${hit.address}")
+                    Log.i(TAG, "scan matched target ${hit.address}")
                     return hit
                 }
             }
-            Log.d(TAG, "target $targetNorm never advertised — falling back to strongest advert")
+            Log.i(TAG, "target $targetNorm never advertised — falling back to strongest advert")
         }
         return best.values.maxByOrNull { it.rssi }
     }
