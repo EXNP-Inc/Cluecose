@@ -139,8 +139,16 @@ class RealGlucoseRepository(
         cancelled = false
         val saved = state
         if (saved == null) {
-            emit(Event.NfcAwaiting(true))
-            emit(Event.Status("No sensor paired yet — hold the top of the phone to the sensor."))
+            // The reader is NOT armed yet — `enableReaderMode` only runs in
+            // [nfcPair] (the "Pair with NFC tap" tap). Claiming "armed" here
+            // showed a stale "reader is armed" line next to an "NFC is off"
+            // rejection on the Sony.
+            emit(Event.NfcAwaiting(false))
+            emit(
+                Event.Status(
+                    "No sensor paired yet — tap “Pair with NFC tap”, then hold the top of the phone to the sensor.",
+                ),
+            )
             return
         }
         worker.execute {
@@ -174,6 +182,10 @@ class RealGlucoseRepository(
 
     override fun nfcPair() {
         val reader = nfcReader
+        // A rejected tap must clear any prior "reader armed" state — otherwise
+        // the NFC box keeps claiming the reader is armed while the status line
+        // says the tap was rejected (observed on the Sony).
+        emit(Event.NfcAwaiting(false))
         if (reader == null) {
             emit(Event.Status("NFC is not available on this device."))
             return
