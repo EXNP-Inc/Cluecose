@@ -97,7 +97,14 @@ class NfcActivationReader(activity: Activity) {
     private val readerCallback = object : NfcAdapter.ReaderCallback {
         override fun onTagDiscovered(tag: Tag) {
             val mySession = session
-            if (stopped || inFlight) return
+            if (stopped || inFlight) {
+                // Diagnostic: the framework can keep routing tags while our
+                // `stopped` flag is set (zombie reader — see stop()). A silent
+                // return here cost a field session: the tag WAS routed, the
+                // app looked dead.
+                Log.w(TAG, "tag seen but reader not active (stopped=$stopped inFlight=$inFlight) — dropped")
+                return
+            }
             inFlight = true
             Log.i(TAG, "tag discovered — running patch-info + activation exchange")
             Thread({
@@ -188,7 +195,13 @@ class NfcActivationReader(activity: Activity) {
     fun stop() {
         stopped = true
         armed = false
-        main.post { runCatching { adapter?.disableReaderMode(activity) } }
+        // Route through resolveAdapter() — the cached getSystemService proxy
+        // is NULL on Samsung (and Sony), so a bare `adapter?.disableReaderMode`
+        // no-ops and leaves the framework reader ON (mEnableReader stays true)
+        // while `stopped` is true → a zombie reader: the OS routes tags to us
+        // but onTagDiscovered early-returns. Same fix as start().
+        val a = resolveAdapter()
+        main.post { runCatching { a?.disableReaderMode(activity) } }
     }
 
     /**
@@ -197,8 +210,9 @@ class NfcActivationReader(activity: Activity) {
      */
     fun resume() {
         if (!armed || stopped) return
+        val a = resolveAdapter()
         main.post {
-            runCatching { adapter?.enableReaderMode(activity, readerCallback, READER_FLAGS, null) }
+            runCatching { a?.enableReaderMode(activity, readerCallback, READER_FLAGS, null) }
         }
     }
 
