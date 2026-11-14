@@ -444,6 +444,12 @@ class RealGlucoseRepository(
         // (tail4=f969b9d3, CHALLENGE timeouts) with no recovery path short of
         // another tap — and the same race could repeat.
         state = newState
+        // Cancel any pending scheduled reconnect (the preempted cycle's
+        // failure handler may have just re-armed one — pair24 14:54:41:
+        // "scheduleReconnect #10" fired 6 ms BEFORE this task). It must not
+        // race the fresh handshake; if the connect below fails, the catch
+        // below starts the single clean chain on the NEW state.
+        generation += 1
         try {
             connectAndAuthorize(newState.blePIN, newState.bleAddress, newState, allowCached = false)
         } catch (e: Exception) {
