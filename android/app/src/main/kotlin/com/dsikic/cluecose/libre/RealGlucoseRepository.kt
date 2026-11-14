@@ -432,12 +432,31 @@ class RealGlucoseRepository(
             pairedAtMs = System.currentTimeMillis(),
             phase5RawKey = ByteArray(0),
         )
+        // Persist the fresh activation IMMEDIATELY. The activation rotates the
+        // sensor's blePIN, so the previously cached session (old PIN) is dead
+        // from this moment. If the BLE connect below misses the sensor's
+        // advertising window (~1x/min, 6 attempts ≈ 7.5 min), the reconnect
+        // loop picks up THIS state and retries the FULL 03 03 handshake with
+        // the NEW PIN on the next window (phase5RawKey empty → useCached
+        // false) — instead of bricking on the old PIN forever.
+        // pair24 14:54: a missed window discarded the fresh activation
+        // (PIN 367fb980); the loop then burned hours on the dead old session
+        // (tail4=f969b9d3, CHALLENGE timeouts) with no recovery path short of
+        // another tap — and the same race could repeat.
+        state = newState
         try {
             connectAndAuthorize(newState.blePIN, newState.bleAddress, newState, allowCached = false)
         } catch (e: Exception) {
-            Log.w(TAG, "NFC-pair connect failed: ${e.message}", e)
-            emit(Event.Status("Bluetooth connection failed: ${shortError(e)}"))
-            emit(Event.Status("Hold the top of the phone to the sensor to pair again."))
+            Log.w(TAG, "NFC-pair connect failed (activation already saved): ${e.message}", e)
+            emit(
+                Event.Status(
+                    "Activation saved — will connect automatically on the sensor's next Bluetooth window.",
+                ),
+            )
+            // Kick the loop so it retries the 03 03 handshake with the new
+            // PIN on the next window (it would also fire on the backoff
+            // schedule; this just removes up to 30 s of dead time).
+            scheduleReconnect()
         }
     }
 
