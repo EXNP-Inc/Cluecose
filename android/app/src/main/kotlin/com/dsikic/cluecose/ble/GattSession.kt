@@ -13,7 +13,6 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.util.Log
 import com.dsikic.cluecose.core.ble.BleFraming
-import com.dsikic.cluecose.core.ble.BleFramingError
 import com.dsikic.cluecose.core.pairing.BleCharRef
 import com.dsikic.cluecose.core.pairing.CommandPairingTransport
 import com.dsikic.cluecose.core.util.Hex
@@ -152,17 +151,37 @@ class GattSession(
         // the FIRST chunk onward (mid-accumulation); only `done` marks a
         // waiter that must not receive further fragments.
         @Volatile var done: Boolean = false,
-        // Per-call seq state (iOS NotifyReassembler.nextExpectedSeq): null
-        // until the FIRST fragment of THIS stream is seen (accepted
-        // unconditionally), then strict +1. Kept on the waiter — NOT on a
-        // shared per-char counter — because the sensor restarts seq at 0
-        // for every stream, and PairingFlow awaits the SAME cert
-        // characteristic twice (65 B sensor cert, then 65 B sensor
-        // ephemeral). A shared counter would desync on the second stream.
-        // Only the GATT executor thread mutates this (feedFragment, from
-        // the live path or the drain).
-        var nextSeq: Int? = null,
-    )
+        // Per-call reassembly state (iOS NotifyReassembler, made tolerant
+        // of the observed sensor behavior): the sensor streams the 140 B
+        // cert as a TIGHT BURST and duplicates frames — 18:50 field run:
+        // the SAME seq-1 frame was delivered twice (both buffered before
+        // the waiter existed, then the strict +1 counter hit
+        // SequenceGap(expected=2, got=1) and the session disconnected 20
+        // ms into the stream, dropping the rest in the stack: "indication/
+        // notif for unknown device, ignore" ×18). Frames can also arrive
+        // OUT OF ORDER (18:49: seq 1 delivered live, seq 0 never reached
+        // the app before the close).
+        //
+        // So: a seq-keyed map of received chunks + a contiguous-advance
+        // pointer from seq 0. Duplicates (same seq, same payload) are
+        // skipped; a conflicting payload for a taken seq keeps the first
+        // and logs. The stream is never "gapped" — genuinely lost frames
+        // surface as the 10 s NotifyTimeout with the received-seqs list,
+        // which the handshake retries on a fresh link.
+        //
+        // Kept on the waiter (NOT a shared per-char counter) because the
+        // sensor restarts seq at 0 for every stream, and PairingFlow
+        // awaits the SAME cert characteristic twice (140 B sensor cert,
+        // then 65 B sensor ephemeral). Only the GATT executor thread
+        // mutates this (feedFragment, from the live path or the drain).
+    ) {
+        // Per-waiter reassembly state (see the doc above). Plain body
+        // properties — a constructor param with an initializer would need an
+        // explicit type. Touched only on the GATT executor thread (same as
+        // the waiter's other interior state), so no @Volatile needed.
+        val receivedChunks = LinkedHashMap<Int, ByteArray>()
+        var nextContiguous: Int = 0
+    }
 
     // ── Lifecycle ──────────────────────────────────────────────────────────
 
@@ -444,30 +463,55 @@ class GattSession(
 
     /**
      * Feed one seq-prefixed security-channel fragment ([seq][chunk]) into
-     * [waiter]: advance the per-characteristic seq counter and accumulate
-     * payload bytes. Returns true when [waiter] is finished (exactly
-     * accumulated, or a seq-gap error was latched). Only the GATT executor
-     * thread calls this (from [handleNotify] live, or from [drainBuffered]).
+     * [waiter]. Tolerant reassembly (see [Waiter.receivedChunks]): store by
+     * seq, skip exact duplicates, advance the contiguous prefix from
+     * seq 0, complete when the contiguous payload reaches [Waiter.exactly].
+     * Never errors on reordering or duplicates — a truly lost frame
+     * surfaces as the [FRAGMENT_TIMEOUT_MS] timeout (the handshake
+     * retries on a fresh link), never as a mid-stream teardown.
+     * Only the GATT executor thread calls this (from [handleNotify] live,
+     * or from [drainBuffered]).
      */
     private fun feedFragment(targetId: String, value: ByteArray, waiter: Waiter): Boolean {
         val seq = value[0].toInt() and 0xFF
-        val expected = waiter.nextSeq
-        if (expected != null && seq != expected) {
-            waiter.error = BleFramingError.SequenceGap(expected, seq)
-            waiter.done = true
-            waiter.latch.countDown()
-            return true
-        }
-        waiter.nextSeq = (seq + 1) and 0xFF
         val chunk = if (value.size > 1) value.copyOfRange(1, value.size) else ByteArray(0)
-        Log.i(TAG, "security notify fed (seq=$seq) hex=${Hex.encode(value)}")
-        val existing = waiter.result
-        val accumulated = if (existing == null) chunk else existing + chunk
+        when (val prior = waiter.receivedChunks[seq]) {
+            null -> {
+                waiter.receivedChunks[seq] = chunk
+                Log.i(TAG, "security notify fed (seq=$seq) hex=${Hex.encode(value)} have=${waiter.receivedChunks.keys.toList()}")
+            }
+            else -> if (prior.contentEquals(chunk)) {
+                Log.w(TAG, "security notify DUP skipped (seq=$seq) — sensor re-sent the same frame")
+            } else {
+                // Conflict: same seq, different payload. The stream already
+                // "started" this seq once; keep the first occurrence (the
+                // sensor's duplicates are byte-identical in the field runs).
+                Log.w(TAG, "security notify CONFLICT at seq=$seq — keeping first occurrence (got ${chunk.size} B vs prior ${prior.size} B)")
+            }
+        }
+        // Advance the contiguous prefix from seq 0.
+        while (waiter.receivedChunks.containsKey(waiter.nextContiguous)) {
+            waiter.nextContiguous = (waiter.nextContiguous + 1) and 0xFF
+        }
+        // Rebuild the contiguous payload (small — ≤ 9 chunks at MTU 23).
+        val ordered = ArrayList<ByteArray>(waiter.nextContiguous)
+        for (s in 0 until waiter.nextContiguous) {
+            waiter.receivedChunks[s]?.let { ordered.add(it) }
+        }
+        val total = ordered.sumOf { it.size }
+        val accumulated = ByteArray(total)
+        var off = 0
+        for (c in ordered) {
+            System.arraycopy(c, 0, accumulated, off, c.size)
+            off += c.size
+        }
         waiter.result = accumulated
         if (accumulated.size >= waiter.exactly) {
-            waiter.result = accumulated.copyOfRange(0, waiter.exactly)
+            val full = accumulated.copyOfRange(0, waiter.exactly)
+            waiter.result = full
             waiter.done = true
             waiter.latch.countDown()
+            Log.i(TAG, "security stream COMPLETE (seq 0..${(waiter.nextContiguous - 1) and 0xFF}) ${full.size} B")
             return true
         }
         return false
@@ -544,13 +588,17 @@ class GattSession(
         val error = waiter.error
         if (error != null) throw error
         if (!waiter.done) {
-            // Timed out. `result` may be PARTIAL (a few of the exactly bytes
-            // accumulated) — it is NOT a valid frame; the caller treats
+            // Timed out. `result` may be PARTIAL (contiguous-from-0 bytes
+            // only) — it is NOT a valid frame; the caller treats
             // NotifyTimeout as a retryable transport failure. Report how
-            // many bytes we did see so the logs can distinguish a slow
-            // stream from a short one.
+            // many bytes we saw AND which seqs landed, so the log can
+            // distinguish "the stream never started" (no seqs) from "the
+            // stream started but frames were lost in flight" (e.g. seqs
+            // 1..7 but no 0).
             val partial = waiter.result?.size ?: 0
-            Log.w(TAG, "awaitNotify(${on.name}) timed out: $partial/$exactly bytes accumulated")
+            val seqsSeen: List<Int> = waiter.receivedChunks.keys.toList().sorted()
+            val seqsShown: String = if (seqsSeen.isEmpty()) "none" else seqsSeen.joinToString(",")
+            Log.w(TAG, "awaitNotify(${on.name}) timed out: $partial/$exactly contiguous bytes; seqs seen: [$seqsShown]")
             throw GattError.NotifyTimeout(on.name)
         }
         return waiter.result!!
