@@ -22,7 +22,7 @@ struct ContentView: View {
                 VStack(spacing: 18) {
                     header
 
-                    if !model.hasPairedSensor {
+                    if !model.hasPairedSensor && !model.demoMode {
                         pairCard
                     }
 
@@ -112,6 +112,9 @@ struct ContentView: View {
                 }
             }
             Spacer()
+            if model.demoMode {
+                demoBadge
+            }
             unitToggle
             Button {
                 showSettings = true
@@ -149,6 +152,21 @@ struct ContentView: View {
         }
         .padding(3)
         .background(.ultraThinMaterial, in: Capsule())
+    }
+
+    /// Small "Demo" tag shown in the header while demo mode is on, so it's
+    /// obvious the readings are synthetic (simulators have no NFC).
+    private var demoBadge: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "wand.and.stars")
+                .font(.system(size: 9, weight: .bold))
+            Text("Demo")
+                .font(.system(size: 10, weight: .semibold))
+        }
+        .foregroundStyle(.black)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(Color(red: 0.35, green: 0.95, blue: 0.65), in: Capsule())
     }
 
     // MARK: Pairing card (first run / takeover)
@@ -331,12 +349,14 @@ struct ContentView: View {
 
     private var connectionPill: some View {
         HStack(spacing: 5) {
-            Image(systemName: model.linkActive ? "bolt.fill" : "bolt.slash.fill")
+            Image(systemName: model.demoMode ? "wand.and.stars" : (model.linkActive ? "bolt.fill" : "bolt.slash.fill"))
                 .font(.system(size: 9, weight: .bold))
-            Text(model.linkActive ? "Direct link" : "Reconnecting")
+            Text(model.demoMode ? "Demo data" : (model.linkActive ? "Direct link" : "Reconnecting"))
                 .font(.system(size: 10, weight: .semibold))
         }
-        .foregroundStyle(model.linkActive ? Color(red: 0.4, green: 0.95, blue: 0.7) : .white.opacity(0.65))
+        .foregroundStyle(model.demoMode
+                         ? Color(red: 0.4, green: 0.95, blue: 0.7)
+                         : (model.linkActive ? Color(red: 0.4, green: 0.95, blue: 0.7) : .white.opacity(0.65)))
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
         .background(.white.opacity(0.1), in: Capsule())
@@ -631,6 +651,22 @@ struct SettingsSheet: View {
                     } else {
                         LabeledContent("Health app", value: "unavailable")
                     }
+                }
+
+                Section("Demo mode") {
+                    Toggle(isOn: $model.demoMode) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Simulator demo data")
+                            Text(model.demoMode
+                                 ? "On — feeding synthetic glucose + meals"
+                                 : "Off — needs a paired sensor")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("Simulators have no NFC, so a real sensor can't be paired. Demo mode injects a synthetic 48 h glucose curve and sample meals so every screen works without hardware. Readings are made up, not real.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 nutritionSection

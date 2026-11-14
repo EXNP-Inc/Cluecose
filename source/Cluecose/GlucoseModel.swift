@@ -101,6 +101,22 @@ final class GlucoseModel: ObservableObject {
     /// lives for the app's lifetime.
     let foodLog: FoodLogModel
 
+    /// Simulator demo mode (Settings toggle, persisted). The simulators have
+    /// no NFC, so a real sensor can't be paired; demo mode injects a synthetic
+    /// 48 h glucose series + sample meals through the same `ingest()` path so
+    /// every surface populates without a sensor.
+    @Published var demoMode: Bool {
+        didSet {
+            UserDefaults.standard.set(demoMode, forKey: Self.demoModeKey)
+            applyDemoMode()
+        }
+    }
+
+    private static let demoModeKey = "cluecose.demoMode"
+    /// One re-injection of demo data per 60 s (keeps the series "live" while
+    /// the toggle is on).
+    private var demoRefreshTask: Task<Void, Never>?
+
     /// Blood-glucose readings older than this are considered stale.
     private let freshWindow: TimeInterval = 25 * 60
     private var healthKitObserver: AnyCancellable?
@@ -169,6 +185,7 @@ final class GlucoseModel: ObservableObject {
         libreViewAccountID = UserDefaults.standard.string(forKey: Self.accountIDKey) ?? ""
         healthKitEnabled = UserDefaults.standard.object(forKey: HealthKitSync.enabledKey) as? Bool ?? true
         liveActivityEnabled = UserDefaults.standard.bool(forKey: LiveActivityManager.enabledKey)
+        demoMode = UserDefaults.standard.bool(forKey: Self.demoModeKey)
 
         directReader = LibreDirectReader()
         // Create the food-log brain (it holds a weak reference back to us).
@@ -212,13 +229,26 @@ final class GlucoseModel: ObservableObject {
         // Attach the food model now that this model is fully initialized
         // (it observes $allSamples + starts its recompute timer).
         foodLog.attach(self)
+        // If demo mode was on before the last launch, re-inject the synthetic
+        // series now (the didSet in init didn't run — this is the initial load).
+        if demoMode {
+            applyDemoMode()
+        }
     }
 
     // MARK: App lifecycle
 
     func start() {
         mirrorReader()
-        directReader.start()
+        // In demo mode there is no sensor to talk to; skip the reader entirely
+        // (it would just log a failed BLE attempt) and keep the synthetic
+        // series flowing instead.
+        if demoMode {
+            injectDemoGlucose()
+            startDemoRefresh()
+        } else {
+            directReader.start()
+        }
         refreshDerived()
         startHealthKit()
         // Kick the nutrition-sleep refresh once on launch (throttled in the
@@ -273,6 +303,7 @@ final class GlucoseModel: ObservableObject {
 
     func stop() {
         directReader.stop()
+        stopDemoRefresh()
         externalRefreshTask?.cancel()
         externalRefreshTask = nil
     }
@@ -339,6 +370,77 @@ final class GlucoseModel: ObservableObject {
         sensorAgeMinutes = nil
         sensorExpired = false
         refreshDerived()
+    }
+
+    // MARK: Demo mode (simulators have no NFC)
+
+    /// Turn demo mode on/off. When on: seed the food log (only on the first
+    /// turn-on, so a running session's edits aren't clobbered), inject a fresh
+    /// synthetic 48 h series through `ingest()`, and refresh it every ~60 s so
+    /// the hero reading stays "Live" and insights land as their 3 h windows
+    /// pass. When off: stop the refresh and drop any leftover synthetic series
+    /// (a real reader, if paired, would re-fill it).
+    func applyDemoMode() {
+        if demoMode {
+            // Inject the synthetic series FIRST so the merged series is
+            // non-empty when the insight engine runs, then seed meals (only if
+            // the store is empty — don't clobber a running session's entries).
+            injectDemoGlucose()
+            if foodLog.store.all().isEmpty {
+                seedDemoMeals()
+            }
+            // Force an immediate insight recompute (bypasses the 120 s throttle)
+            // so finalized meals light up their insight right away.
+            foodLog.recomputeInsights(force: true)
+            startDemoRefresh()
+        } else {
+            stopDemoRefresh()
+            // Only clear the synthetic series if the user hasn't since turned
+            // demo mode off with a real sensor reading present.
+            if samples.isEmpty {
+                recomputeAll()
+            }
+        }
+        refreshDerived()
+    }
+
+    /// Push a fresh synthetic 48 h series through the real `ingest()` path, so
+    /// every downstream consumer (analytics, charts, insight engine, watch
+    /// push) sees it exactly as it would a real sensor stream.
+    private func injectDemoGlucose() {
+        let now = Date()
+        ingest(DemoData.glucoseSeries(now: now))
+    }
+
+    /// Seed the food store with the sample meals (once). Done on the first
+    /// demo-mode turn-on so an in-progress session's entries aren't replaced.
+    /// (`applyDemoMode` runs a force insight recompute right after seeding.)
+    private func seedDemoMeals() {
+        let now = Date()
+        for entry in DemoData.foodEntries(now: now) {
+            foodLog.store.add(entry)
+        }
+        foodLog.refresh()
+    }
+
+    /// Keep re-injecting the synthetic series while demo mode is on so the
+    /// latest reading stays within the fresh window and the curve advances
+    /// (a real reader does this every ~15 s; 60 s is plenty for a demo).
+    private func startDemoRefresh() {
+        demoRefreshTask?.cancel()
+        demoRefreshTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                guard let self, !Task.isCancelled else { break }
+                guard self.demoMode else { break }
+                self.injectDemoGlucose()
+            }
+        }
+    }
+
+    private func stopDemoRefresh() {
+        demoRefreshTask?.cancel()
+        demoRefreshTask = nil
     }
 
     // MARK: Derived

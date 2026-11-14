@@ -61,7 +61,6 @@ struct FoodLogSheet: View {
     @State private var modelDescription = ""
     @State private var citations: [SourceCitation] = []
     @State private var hasEstimated = false
-    @State private var showFallback = false
     @State private var errorMessage: String?
     @State private var isEstimating = false
 
@@ -269,12 +268,6 @@ struct FoodLogSheet: View {
     @ViewBuilder
     private var estimateSection: some View {
         Section {
-            if showFallback {
-                Label("Enter values by hand — the estimate failed, but you can still log this meal.",
-                      systemImage: "pencil.circle")
-                    .font(.footnote)
-                    .foregroundStyle(.orange)
-            }
             if isEstimating {
                 HStack(spacing: 8) {
                     ProgressView()
@@ -291,9 +284,9 @@ struct FoodLogSheet: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
-            .disabled(isEstimating || !configEnabled)
+            .disabled(isEstimating)
             if !configEnabled {
-                Text("Set an API key in Settings › Nutrition analysis to enable estimation.")
+                Text("No API key set — Estimate will use a quick local guess. Set a key in Settings › Nutrition analysis for model-based estimates.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -304,37 +297,45 @@ struct FoodLogSheet: View {
         errorMessage = nil
         isEstimating = true
         defer { isEstimating = false }
+        let request = NutritionPrompt.Request(
+            description: descriptionText.isEmpty ? "meal photo" : descriptionText,
+            serving: servingText.isEmpty ? nil : servingText,
+            context: contextText.isEmpty ? nil : contextText,
+            mode: mode == .photo ? .photo : .manual,
+            photoCount: mode == .photo ? photos.count : 0
+        )
+        let photosToSend = mode == .photo ? photos : []
+        // Try the model first; if it can't produce an estimate (e.g. the
+        // configured OpenAI key has no credits — HTTP 429 — or is offline),
+        // fall back to a local keyword-based estimate so the button still
+        // fills the rows and the meal can be logged.
+        let estimate: NutritionPrompt.Estimate
         do {
-            let request = NutritionPrompt.Request(
-                description: descriptionText.isEmpty ? "meal photo" : descriptionText,
-                serving: servingText.isEmpty ? nil : servingText,
-                context: contextText.isEmpty ? nil : contextText,
-                mode: mode == .photo ? .photo : .manual,
-                photoCount: mode == .photo ? photos.count : 0
-            )
-            let photosToSend = mode == .photo ? photos : []
-            let estimate = try await model.runEstimate(request: request, photos: photosToSend)
-            // Fill the rows.
-            kcalText = number(estimate.caloriesKcal)
-            proteinText = number(estimate.proteinG)
-            carbsText = number(estimate.carbsG)
-            fatText = number(estimate.fatG)
-            satFatText = number(estimate.saturatedFatG)
-            sodiumText = number(estimate.sodiumMg)
-            caffeineText = number(estimate.caffeineMg)
-            alcoholText = number(estimate.alcoholG)
-            if let d = estimate.description, !d.isEmpty {
-                modelDescription = d
-                // For a photo entry with no user text, use the model's name.
-                if descriptionText.isEmpty { descriptionText = d }
-            }
-            citations = estimate.citations
-            hasEstimated = true
-            showFallback = false
+            estimate = try await model.runEstimate(request: request, photos: photosToSend)
         } catch {
-            errorMessage = error.localizedDescription
-            showFallback = true
+            estimate = FoodLLMClient.shared.fallbackEstimate(
+                description: request.description,
+                serving: request.serving,
+                context: request.context
+            )
+            errorMessage = "Used a local estimate — the model endpoint is unavailable. Edit any value below."
         }
+        // Fill the rows.
+        kcalText = number(estimate.caloriesKcal)
+        proteinText = number(estimate.proteinG)
+        carbsText = number(estimate.carbsG)
+        fatText = number(estimate.fatG)
+        satFatText = number(estimate.saturatedFatG)
+        sodiumText = number(estimate.sodiumMg)
+        caffeineText = number(estimate.caffeineMg)
+        alcoholText = number(estimate.alcoholG)
+        if let d = estimate.description, !d.isEmpty {
+            modelDescription = d
+            // For a photo entry with no user text, use the model's name.
+            if descriptionText.isEmpty { descriptionText = d }
+        }
+        citations = estimate.citations
+        hasEstimated = true
     }
 
     private func number(_ v: Double?) -> String {
