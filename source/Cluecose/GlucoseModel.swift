@@ -185,7 +185,10 @@ final class GlucoseModel: ObservableObject {
         libreViewAccountID = UserDefaults.standard.string(forKey: Self.accountIDKey) ?? ""
         healthKitEnabled = UserDefaults.standard.object(forKey: HealthKitSync.enabledKey) as? Bool ?? true
         liveActivityEnabled = UserDefaults.standard.bool(forKey: LiveActivityManager.enabledKey)
-        demoMode = UserDefaults.standard.bool(forKey: Self.demoModeKey)
+        // Demo mode defaults ON: the simulators have no NFC, so a fresh launch
+        // should immediately show a working app with data, not the pair card.
+        // An explicit "off" (stored false) is respected on subsequent launches.
+        demoMode = (UserDefaults.standard.object(forKey: Self.demoModeKey) as? Bool) ?? true
 
         directReader = LibreDirectReader()
         // Create the food-log brain (it holds a weak reference back to us).
@@ -246,6 +249,7 @@ final class GlucoseModel: ObservableObject {
         if demoMode {
             injectDemoGlucose()
             startDemoRefresh()
+            clog("DEMO: started in demo mode (no NFC) — \(samples.count) synthetic samples, \(foodLog.store.all().count) meal entries; sensor pairing not required")
         } else {
             directReader.start()
         }
