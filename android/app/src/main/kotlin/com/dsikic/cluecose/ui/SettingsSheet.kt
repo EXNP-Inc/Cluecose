@@ -24,16 +24,27 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.dsikic.cluecose.food.FoodLLMConfig
+import com.dsikic.cluecose.food.OkHttpFoodClient
+import kotlinx.coroutines.launch
 
 /**
  * Settings dialog mirroring iOS `SettingsSheet` (ContentView.swift:578):
@@ -135,6 +146,9 @@ fun SettingsSheet(
                     value = if (Build.VERSION.SDK_INT >= 28) "Not set up" else "Unavailable",
                     modifier = Modifier.fillMaxWidth(),
                 )
+
+                // MARK: Nutrition analysis (LLM)
+                NutritionSection()
 
                 Text(
                     text = "Not a medical device.",
@@ -269,6 +283,127 @@ private fun ActionRow(text: String, onClick: () -> Unit) {
             contentDescription = null,
             tint = CluecoseColors.white(0.4f),
             modifier = Modifier.size(14.dp),
+        )
+    }
+}
+
+/**
+ * The "Nutrition analysis" (LLM endpoint) settings section — the Android
+ * mirror of iOS `SettingsSheet.nutritionSection` (ContentView.swift:682).
+ *
+ * Fields: Base URL, Model, API key (obscured). Buttons: Save (persists the
+ * config) and Test connection (a trivial `max_tokens:1` completion, result
+ * shown green when it starts with "OK", orange otherwise). The client reads
+ * its config fresh on every call, so a Save-then-Test round-trip applies
+ * immediately (the iOS `FoodLLMClient.shared` per-call pattern).
+ */
+@Composable
+private fun NutritionSection() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var baseURL by remember { mutableStateOf(FoodLLMConfig.load(context).baseURL) }
+    var model by remember { mutableStateOf(FoodLLMConfig.load(context).model) }
+    var apiKey by remember { mutableStateOf(FoodLLMConfig.load(context).apiKey) }
+    var testResult by remember { mutableStateOf<String?>(null) }
+    var isTesting by remember { mutableStateOf(false) }
+
+    val client = remember { OkHttpFoodClient(context) }
+    val keyEnabled = apiKey.trim().isNotEmpty()
+
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SectionLabel("Nutrition analysis")
+        OutlinedTextField(
+            value = baseURL,
+            onValueChange = { baseURL = it },
+            singleLine = true,
+            label = { Text("Base URL", fontSize = 12.sp) },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = model,
+            onValueChange = { model = it },
+            singleLine = true,
+            label = { Text("Model", fontSize = 12.sp) },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = apiKey,
+            onValueChange = { apiKey = it },
+            singleLine = true,
+            label = { Text("API key", fontSize = 12.sp) },
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Save (persists the config; clears the test result).
+            Text(
+                text = "Save",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = CluecoseColors.GlowInRange,
+                modifier = Modifier
+                    .background(CluecoseColors.GlowInRange.copy(alpha = 0.14f), RoundedCornerShape(8.dp))
+                    .clickable {
+                        FoodLLMConfig.save(
+                            context,
+                            FoodLLMConfig(
+                                baseURL = baseURL.trim(),
+                                model = model.trim(),
+                                apiKey = apiKey,
+                            ),
+                        )
+                        testResult = null
+                    }
+                    .padding(horizontal = 14.dp, vertical = 7.dp),
+            )
+            // Test connection (trivial completion against the just-saved config).
+            Text(
+                text = if (isTesting) "Testing…" else "Test connection",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = if (isTesting) CluecoseColors.white(0.5f) else CluecoseColors.white(0.8f),
+                modifier = Modifier
+                    .background(
+                        if (isTesting) CluecoseColors.white(0.08f) else CluecoseColors.white(0.12f),
+                        RoundedCornerShape(8.dp),
+                    )
+                    .clickable(enabled = !isTesting && keyEnabled) {
+                        // Save first so the test targets the current fields (iOS parity).
+                        FoodLLMConfig.save(
+                            context,
+                            FoodLLMConfig(baseURL = baseURL.trim(), model = model.trim(), apiKey = apiKey),
+                        )
+                        isTesting = true
+                        scope.launch {
+                            testResult = try {
+                                client.testConnection()
+                            } catch (e: Exception) {
+                                "Error: ${e.message}"
+                            }
+                            isTesting = false
+                        }
+                    }
+                    .padding(horizontal = 14.dp, vertical = 7.dp),
+            )
+        }
+
+        testResult?.let { result ->
+            Text(
+                text = result,
+                fontSize = 12.sp,
+                color = if (result.startsWith("OK")) CluecoseColors.GlowInRange else CluecoseColors.GlowHigh,
+            )
+        }
+
+        Text(
+            text = "Your photos and details are sent only to the configured model endpoint for estimation; glucose stays on-device.",
+            fontSize = 12.sp,
+            color = CluecoseColors.white(0.4f),
         )
     }
 }

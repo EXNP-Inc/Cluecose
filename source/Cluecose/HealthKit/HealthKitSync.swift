@@ -150,6 +150,91 @@ final class HealthKitSync: ObservableObject {
         }
     }
 
+    // MARK: Sleep (read-only, for the nutrition-sleep association)
+
+    /// The sleep-analysis type, read-only.
+    private let sleepType = HKCategoryType(.sleepAnalysis)
+
+    /// Request read access to sleep analysis (a second grant beyond glucose).
+    /// Safe to call repeatedly; the system dialog appears only once for the
+    /// new type. Throws when HealthKit is unavailable or access is denied —
+    /// callers then surface nothing (an empty association list).
+    func requestSleepReadAuthorization() async throws {
+        guard available else { throw CQError.hkUnavailable }
+        var granted = false
+        try await healthStore.requestAuthorization(toShare: [], read: [sleepType]) { success, error in
+            if let error {
+                granted = false
+                clog("HK sleep authorization failed: \(error)")
+            } else {
+                granted = success
+            }
+        }
+        guard granted else { throw CQError.accessDenied }
+    }
+
+    /// Total asleep minutes for each of the last `days` nights (local
+    /// calendar days), as `(day, asleepMinutes)` pairs, oldest -> newest.
+    /// Returns nil when HealthKit is unavailable, denied, or there is no
+    /// sleep data in the window.
+    func readSleepNights(days: Int) async -> [(day: Date, asleepMinutes: Double)]? {
+        guard available else { return nil }
+        let calendar = Calendar.current
+        let now = Date()
+        let start = now.addingTimeInterval(-Double(days) * 86_400)
+        let samplePredicate = HKSamplePredicate.categorySample(
+            type: sleepType,
+            predicate: HKQuery.predicateForSamples(withStart: start, end: nil, options: .strictStartDate)
+        )
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [samplePredicate],
+            sortDescriptors: [SortDescriptor(\HKCategorySample.startDate, order: .forward)],
+            limit: nil
+        )
+        let results: [HKCategorySample]
+        do {
+            results = try await descriptor.result(for: healthStore)
+        } catch {
+            clog("HK sleep read failed: \(error)")
+            return nil
+        }
+        // Accumulate asleep minutes per local day.
+        var perDay: [Int: Double] = [:]
+        var daysSeen = 0
+        for sample in results {
+            // Asleep = InBed(0) and Awake(2) excluded; i.e. the asleep stages.
+            let sleepValue = HKCategoryValueSleepAnalysis(rawValue: sample.value) ?? .awake
+            guard HKCategoryValueSleepAnalysis.allAsleepValues.contains(sleepValue) else { continue }
+            let day = calendar.ordinality(of: .day, in: .era, for: sample.startDate) ?? 0
+            perDay[day, default: 0] += Double(sample.endDate.timeIntervalSince(sample.startDate) / 60)
+            daysSeen += 1
+        }
+        guard daysSeen > 0 else { return nil }
+        // Map back to actual dates (use the newest day as the anchor).
+        let latestDay = calendar.ordinality(of: .day, in: .era, for: now) ?? 0
+        var out: [(Date, Double)] = []
+        for (day, minutes) in perDay {
+            let anchor = Self.startOfDay(calendar.date(byAdding: .day, value: (day - latestDay), to: now) ?? now)
+            out.append((anchor, minutes))
+        }
+        return out.sorted { $0.0 < $1.0 }.map { (day: $0.0, asleepMinutes: $0.1) }
+    }
+
+    private enum CQError: LocalizedError {
+        case hkUnavailable, accessDenied
+        var errorDescription: String? {
+            switch self {
+            case .hkUnavailable: return "Health app unavailable"
+            case .accessDenied: return "Sleep access not granted"
+            }
+        }
+    }
+
+    /// The start of the local day containing this date.
+    private static func startOfDay(_ date: Date) -> Date {
+        Calendar.current.startOfDay(for: date)
+    }
+
     /// Read glucose from ALL sources over the last `window` seconds.
     func readRecentSamples(window: TimeInterval) async -> [GlucoseSample] {
         guard available else { return [] }

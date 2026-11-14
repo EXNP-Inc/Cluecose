@@ -95,6 +95,11 @@ final class GlucoseModel: ObservableObject {
     private static let accountIDKey = "cluecose.libre.accountID"
 
     private let directReader: LibreDirectReader
+    /// The food-log brain (LLM estimates + on-device insights + patterns +
+    /// nutrition-sleep). Created here and attached to `self` (it holds a
+    /// weak reference back). Owned by the app model so its recompute timer
+    /// lives for the app's lifetime.
+    let foodLog: FoodLogModel
 
     /// Blood-glucose readings older than this are considered stale.
     private let freshWindow: TimeInterval = 25 * 60
@@ -166,6 +171,9 @@ final class GlucoseModel: ObservableObject {
         liveActivityEnabled = UserDefaults.standard.bool(forKey: LiveActivityManager.enabledKey)
 
         directReader = LibreDirectReader()
+        // Create the food-log brain (it holds a weak reference back to us).
+        // Attach at the end of init, once this model is fully initialized.
+        foodLog = FoodLogModel()
         // Register the background link-keeper once per launch and point the
         // BG handler at THIS instance's reconnect. (After directReader exists
         // so the weak-self closure can form.)
@@ -201,6 +209,9 @@ final class GlucoseModel: ObservableObject {
             }
         }
         mirrorReader()
+        // Attach the food model now that this model is fully initialized
+        // (it observes $allSamples + starts its recompute timer).
+        foodLog.attach(self)
     }
 
     // MARK: App lifecycle
@@ -210,6 +221,11 @@ final class GlucoseModel: ObservableObject {
         directReader.start()
         refreshDerived()
         startHealthKit()
+        // Kick the nutrition-sleep refresh once on launch (throttled in the
+        // model; a no-op while HealthKit is unavailable/denied).
+        Task { [weak self] in
+            await self?.foodLog.refreshSleepInsights()
+        }
         WatchPusher.shared.activate()
         // Chain the background link-keeper so a locked, suspended app still
         // re-acquires the sensor within the system's refresh cadence.
@@ -372,15 +388,26 @@ final class GlucoseModel: ObservableObject {
             Task { await healthKit.write(samples) }
         }
         // Push the live reading to the watch (WatchConnectivity). The watch's
-        // HealthKit replica lags, so the phone is the real-time source.
+        // HealthKit replica lags, so the phone is the real-time source. We
+        // also piggyback today's food totals + the latest meal insight so the
+        // watch can show a one-line food summary (both optional — nil when
+        // there is none, so the existing call path is unchanged).
         if let latest = merged.last {
+            let foodTotals = foodLog.todayTotals
             WatchPusher.shared.push(
                 mgdl: latest.mgdl,
                 date: latest.date,
                 trendWire: trend.wireValue,
                 unitWire: unit.rawValue,
                 tir: stats.isMeaningful ? stats.tir : nil,
-                burnWire: burnMode.rawValue
+                burnWire: burnMode.rawValue,
+                foodKcal: foodTotals.kcal,
+                foodProtein: foodTotals.proteinG,
+                foodCarbs: foodTotals.carbsG,
+                foodFat: foodTotals.fatG,
+                foodSodium: foodTotals.sodiumMg,
+                foodCaffeine: foodTotals.caffeineMg,
+                insightText: foodLog.latestInsightText
             )
             // Keep the Live Activity (Dynamic Island / Lock Screen / watch)
             // in step with every fresh reading.
@@ -419,6 +446,14 @@ final class GlucoseModel: ObservableObject {
             phase = .listening
         } else {
             phase = .waitingBLE
+        }
+
+        // Recompute meal insights (cheap + throttled: it no-ops unless the
+        // recompute interval has passed) and, rarely, the nutrition-sleep
+        // association lines. Both are on-device; sleep needs HealthKit.
+        foodLog.recomputeInsights()
+        Task { [weak self] in
+            await self?.foodLog.refreshSleepInsights()
         }
     }
 

@@ -33,6 +33,11 @@ final class WatchGlucoseModel: ObservableObject {
     @Published var unit: GlucoseUnit = .mgdl {
         didSet { UserDefaults.standard.set(unit.rawValue, forKey: Self.unitKey) }
     }
+    // Food piggyback (pushed from the phone): today's totals + latest insight.
+    @Published var foodKcal: Double?
+    @Published var foodCarbs: Double?
+    @Published var foodCaffeine: Double?
+    @Published var insightText: String?
 
     /// A live push from the phone within this many seconds is treated as the
     /// authoritative source and overrides the (lagging) HealthKit replica.
@@ -71,10 +76,16 @@ final class WatchGlucoseModel: ObservableObject {
         }
 
         // Live push channel (primary).
-        WatchReceiver.shared.onLive = { [weak self] mgdl, date, trendWire, unitWire, tir, burnWire in
+        WatchReceiver.shared.onLive = { [weak self] mgdl, date, trendWire, unitWire, tir, burnWire,
+                                         foodKcal, foodProtein, foodCarbs, foodFat, foodSodium,
+                                         foodCaffeine, insightText in
             Task { @MainActor in
                 self?.applyLive(mgdl: mgdl, date: date, trendWire: trendWire,
-                                unitWire: unitWire, tir: tir, burnWire: burnWire)
+                                unitWire: unitWire, tir: tir, burnWire: burnWire,
+                                foodKcal: foodKcal, foodProtein: foodProtein,
+                                foodCarbs: foodCarbs, foodFat: foodFat,
+                                foodSodium: foodSodium, foodCaffeine: foodCaffeine,
+                                insightText: insightText)
             }
         }
         WatchReceiver.shared.activate()
@@ -100,13 +111,22 @@ final class WatchGlucoseModel: ObservableObject {
     // MARK: Live push (from the phone)
 
     private func applyLive(mgdl: Double, date: Date, trendWire: String,
-                           unitWire: String, tir: Double?, burnWire: String?) {
+                           unitWire: String, tir: Double?, burnWire: String?,
+                            foodKcal: Double? = nil, foodProtein: Double? = nil,
+                            foodCarbs: Double? = nil, foodFat: Double? = nil,
+                            foodSodium: Double? = nil, foodCaffeine: Double? = nil,
+                            insightText: String? = nil) {
         lastPushAt = Date()
         latest = GlucoseSample(date: date, mgdl: mgdl)
         trend = Trend(wireValue: trendWire)
         tir24h = tir
         burnMode = burnWire.flatMap { BurnMode(rawValue: $0) } ?? .balanced
         isFresh = Date().timeIntervalSince(date) < 25 * 60
+        // Food piggyback: today's totals + the latest meal insight text.
+        self.foodKcal = foodKcal
+        self.foodCarbs = foodCarbs
+        self.foodCaffeine = foodCaffeine
+        self.insightText = insightText
         // Mirror the phone's unit unless the user overrode it on the watch.
         if !unitOverride, let phoneUnit = GlucoseUnit(rawValue: unitWire), phoneUnit != unit {
             unit = phoneUnit

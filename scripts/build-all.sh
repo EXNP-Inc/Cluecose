@@ -63,8 +63,9 @@ ios_side() {
     if [ ! -d "$APP" ]; then echo "NO_APP_PRODUCT"; exit 1; fi
 
     echo "== simctl install + launch =="
-    # Bootstrap/boot the simulator if it isn't already (best effort).
-    xcrun simctl bootstatus "$IOS_SIM_NAME" >/dev/null 2>&1 || xcrun simctl boot "$IOS_SIM_NAME" >/dev/null 2>&1
+    # Boot the simulator if it isn't already (boot is idempotent and returns
+    # quickly for an already-booted device; bootstatus can hang, so avoid it).
+    xcrun simctl boot "$IOS_SIM_NAME" >/dev/null 2>&1 || true
     xcrun simctl install "$IOS_SIM_NAME" "$APP" || { echo "SIM_INSTALL_FAILED"; exit 1; }
     xcrun simctl launch "$IOS_SIM_NAME" "$APP_BUNDLE_ID" || { echo "SIM_LAUNCH_FAILED"; exit 1; }
     echo "SIM_OK"
@@ -114,7 +115,7 @@ tail -n 20 "$AND_LOG"
 IOS_MARK="SIM_OK";  [ $IOS_RC -ne 0 ]   && IOS_MARK=""
 AND_MARK="ANDROID_OK"; [ $AND_RC -ne 0 ] && AND_MARK=""
 
-if [ $IOS_RC -ne 0 ] || $AND_RC -ne 0; then
+if [ $IOS_RC -ne 0 ] || [ $AND_RC -ne 0 ]; then
   [ -n "$IOS_MARK" ]   || fail "iOS side (rc=$IOS_RC) — see $IOS_LOG"
   [ -n "$AND_MARK" ] || fail "Android side (rc=$AND_RC) — see $AND_LOG"
   exit 1

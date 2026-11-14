@@ -38,8 +38,23 @@ final class WatchPusher: NSObject, WCSessionDelegate {
         WCSession.default.activate()
     }
 
-    /// Push the current reading + 24 h stats to the watch.
-    func push(mgdl: Double, date: Date, trendWire: String, unitWire: String, tir: Double?, burnWire: String?) {
+    /// Push the current reading + 24 h stats to the watch. The food totals
+    /// and latest insight (all optional, defaulting to nil) piggyback on the
+    /// same context so the watch can show a one-line food summary without an
+    /// extra channel.
+    func push(mgdl: Double,
+              date: Date,
+              trendWire: String,
+              unitWire: String,
+              tir: Double?,
+              burnWire: String?,
+              foodKcal: Double? = nil,
+              foodProtein: Double? = nil,
+              foodCarbs: Double? = nil,
+              foodFat: Double? = nil,
+              foodSodium: Double? = nil,
+              foodCaffeine: Double? = nil,
+              insightText: String? = nil) {
         guard WCSession.default.activationState == .activated else { return }
         guard Date().timeIntervalSince(lastPush) >= minInterval else {
             pending = true
@@ -56,6 +71,13 @@ final class WatchPusher: NSObject, WCSessionDelegate {
         ]
         if let tir { ctx["tir"] = tir }
         if let burnWire { ctx["burn"] = burnWire }
+        if let foodKcal { ctx["foodKcal"] = foodKcal }
+        if let foodProtein { ctx["foodProtein"] = foodProtein }
+        if let foodCarbs { ctx["foodCarbs"] = foodCarbs }
+        if let foodFat { ctx["foodFat"] = foodFat }
+        if let foodSodium { ctx["foodSodium"] = foodSodium }
+        if let foodCaffeine { ctx["foodCaffeine"] = foodCaffeine }
+        if let insightText, !insightText.isEmpty { ctx["insightText"] = insightText }
         do {
             try WCSession.default.updateApplicationContext(ctx)
         } catch {

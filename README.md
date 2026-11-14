@@ -154,13 +154,91 @@ Storing/Balanced/Burning state on the wrist. It polls Health every 30 s
   so a real paired watch gets it automatically when the iPhone app is
   installed.)
 
+## Food log & blood-sugar insights
+
+Log what you eat and see how it moves your glucose. Two phases, both
+all-local and cross-platform (the same shared logic runs on iOS and Android,
+and the Apple Watch piggybacks a one-line summary).
+
+**Phase 1 — food log.** Add a meal two ways, both of which run through an
+OpenAI-compatible vision/text model for an *estimate* you then review and
+edit before saving:
+
+- **Type it** — a description (plus optional serving and a free-text
+  "context" field for what a photo can't know: portion, brand, preparation,
+  hidden ingredients).
+- **Photograph it** — up to 5 photos (camera or gallery), compressed to ~720 px
+  and sent as base64 to the model as the call's image input.
+
+The model returns a strict JSON estimate for the **whole portion**: calories,
+protein, carbs, fat, saturated fat, sodium, caffeine and alcohol — **no
+vitamins or minerals by design** (this is a CGM companion, not a clinical diet
+app). Every value is labeled an estimate until you edit it. If no API key is
+set the feature is disabled and the form falls back to fully manual entry; if
+a call fails you can always enter values by hand. Web-grounded estimates can
+carry clickable source citations. Entries persist for 30 days, with a
+per-day totals header (all eight nutrients) and meal-time markers.
+
+- **Settings → Nutrition analysis** sets the endpoint (default
+  `https://api.openai.com/v1`), model (default `gpt-4o-mini`) and API key,
+  with a "Test connection" button. **Privacy:** photos and meal details go
+  *only* to that configured endpoint for estimation; glucose never leaves the
+  phone and is never sent to the model.
+
+**Phase 2 — per-meal blood-sugar insight.** Deterministic, on-device, and
+**shown only when there is something to say** (otherwise nothing): using the
+merged CGM series, it takes a 30-min pre-meal baseline and the 180-min
+post-meal window, and flags a **spike** (peak ≥ +30 mg/dL over baseline) or a
+**reactive low** (trough ≤ −30 mg/dL), reporting peak, Δ, time-to-peak,
+return-to-baseline, and the rise **per 10 g of carbs**. A meal only gets an
+insight once its full post-meal window has elapsed (final-only), and repeated
+similar meals get a cross-meal comparison. No logged-meal detection, no
+progressive hints — if the curve was unremarkable, the UI shows nothing.
+
+The **Learn** surface rolls the last 7 days into per-day averages (all eight
+nutrients) plus a deterministic set of coaching follow-up questions
+(caffeine, protein, fat-quality, sodium, alcohol). On iPhone a
+nutrition–sleep section correlates dinner nutrients with HealthKit sleep
+durations (**association only, never causation**).
+
+> All of this is educational, not medical advice. Estimates are a first draft
+> for *your* review; the insight is a description of your own CGM data.
+
+## Android port
+
+Cluecose also ships as an Android (Kotlin/Compose) app under `android/` with a
+production-shaped Libre 3 reader (NFC tap → BLE pairing → AES-CCM data plane,
+24 h backfill) and the same food-log + insights feature. The two platforms stay
+**behaviorally identical** through a shared golden-vector idiom (the same
+mechanism the repo already uses for the Libre 3 crypto): the Swift `CluecoseCore`
+food layer and the Kotlin `:core` mirror are golden-tested against the **same**
+fixture files (`CluecoseCore/Sources/CluecoseCore/Resources/food/tests/*.json`),
+one shared prompt template, and one JSON storage schema (`cluecose.food.entries`).
+
 ## Build & run
 
 ```bash
+scripts/build-all.sh                     # BOTH platforms in parallel, simulator-only (below)
 scripts/install-launch-duo.sh            # build, install + launch on "DS iPhone Duo"
 scripts/install-launch-duo.sh <UDID>     # other device (use the UDID, e.g. 00008160-...)
 scripts/build-run-ios.sh                 # generic build (no device)
 ```
+
+`scripts/build-all.sh` is the cross-platform gate and is **simulator / no-device
+only** — it runs the two sides concurrently and exits non-zero if either fails:
+
+- **iOS** — `swift test` (the shared `CluecoseCore` golden tests) +
+  `xcodebuild` for an **iOS Simulator** (`CODE_SIGNING_ALLOWED=NO`) +
+  `simctl install`/`launch` on a booted iPhone simulator. No `devicectl`, no
+  physical device.
+- **Android** — `gradle :core:test` (the same golden fixtures) +
+  `gradle :app:assembleDebug`.
+
+It resolves the toolchain from the environment (overridable): `XCODE`
+(default `/Applications/Xcode.app`), `JAVA_HOME` (default
+`/opt/homebrew/opt/openjdk@17`), `GRADLE` (default
+`$HOME/tools/gradle-8.10.2/bin/gradle`), `IOS_SIM_NAME` (default `iPhone 17`).
+There is no `gradlew` in the repo — the Gradle distribution path above is used.
 
 The device destination must be the **UDID** (from
 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun devicectl
@@ -182,8 +260,10 @@ xcodegen binary lives in `tools/xcodegen/`).
     — depends on CluecoseCore.
   - `CluecoseCore` (local SwiftPM package) — the pure, platform-independent
     domain + analytics layer shared by both apps: `GlucoseSample`,
-    `GlucoseStats`, `GlucoseAnalytics` (stats, AUC, burn mode, tips, trend).
-    No HealthKit, no Bluetooth, no UI.
+    `GlucoseStats`, `GlucoseAnalytics` (stats, AUC, burn mode, tips, trend),
+    plus the food layer: `FoodTypes`, `NutritionPrompt` (shared template +
+    strict-JSON parsing), `MealInsightEngine`, `PatternsEngine`. No
+    HealthKit, no Bluetooth, no UI.
 - Entitlements:
   - iPhone: NFC TAG reader + `com.apple.developer.healthkit` (+ empty
     `.access`). The HealthKit entitlement requires a freshly generated
@@ -209,6 +289,18 @@ xcodegen binary lives in `tools/xcodegen/`).
     - `Libre/LibreDirectReader.swift` — the whole direct-BLE path: NFC tap,
       BLE connect, Phase 1–6 authorize, data-plane listener, 24 h backfill,
       reconnect, persistence
+    - `Food/FoodLogModel.swift` — food-log model: add/edit/delete, LLM
+      estimate + manual fallback, insight recompute (final-only, cross-meal),
+      patterns/coaching, nutrition–sleep refresh
+    - `Food/FoodLLMClient.swift` — OpenAI-compatible chat/completions client
+      (text or up to 5 base64 JPEG photos, strict JSON response)
+    - `Food/FoodLogStore.swift` — persistence (UserDefaults + photos on disk)
+    - `Food/FoodLogCard.swift`, `Food/FoodLogSheet.swift` — the log UI
+    - `Food/PatternsCard.swift`, `Food/NutritionSleep.swift` — the Learn UI
+      (7-day patterns, coaching questions, nutrition–sleep association)
+    - `android/core/.../food/` — Kotlin mirror of the Swift food layer
+      (same golden fixtures); `android/app/.../food/` — Compose UI + OkHttp
+      client
   - `source/CluecoseWatch/` + `source/CluecoseWatchExtension/` — watch UI
     (`CluecoseWatchApp.swift`, `WatchHomeView.swift`, `WatchGlucoseModel.swift`)
 
@@ -224,6 +316,14 @@ xcodegen binary lives in `tools/xcodegen/`).
   - `cluecose.unit` — mg/dL or mmol/L
   - `cluecose.healthkit.enabled` — Health app sync on/off (default on)
   - `cluecose.healthkit.lastWritten` — date of the last HK write (dedupe)
+  - `cluecose.food.entries` — food log: JSON list of `FoodEntry` (same schema
+    on Android, stored as base64-of-JSON in the `"cluecose"` SharedPreferences
+    file), 30-day rolling retention
+  - `cluecose.food.llm.config` — nutrition analysis endpoint/model/API key
+    (opt-in; the feature is off until a key is set)
+
+  Meal photos live on disk, not in prefs: `Documents/photos/{entryId}_{i}.jpg`
+  on iOS, `filesDir/food/photos/` on Android.
 
 ## Legal / medical
 
@@ -242,6 +342,13 @@ clinician.
   AUC>140, Storing/Balanced/Burning, tips)
 - ~~Optional write-back of samples to Health~~ ✅ (two-way, on-device)
 - ~~Apple Watch app~~ ✅ (reads HealthKit)
+- ~~Android port~~ ✅ (Kotlin/Compose, real BLE reader)
+- ~~Food log with photo/description-based nutrition estimates~~ ✅ (shared
+  core, iOS + Android, manual fallback)
+- ~~Per-meal blood-sugar insights + 7-day patterns & coaching~~ ✅
+  (deterministic, on-device, final-only)
 - Low/high alerting via local notifications
 - Today-screen widget
 - Longer windows (7/14/30 d) and pattern charts
+- (Deferred, each needs a new Xcode target) widget/Control Center control/
+  App Clip for the food feature

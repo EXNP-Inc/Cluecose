@@ -64,6 +64,11 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
     implementation("androidx.health.connect:connect-client:1.1.0-alpha02")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    // OpenAI-compatible chat/completions client for the nutrition-estimation
+    // feature (the Android mirror of iOS's URLSession-only client). OkHttp is
+    // the only new app dependency; the prompt building + response parsing are
+    // the shared `:core` NutritionPrompt functions.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

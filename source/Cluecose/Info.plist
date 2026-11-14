@@ -26,6 +26,8 @@
 	<true/>
 	<key>NFCReaderUsageDescription</key>
 	<string>Cluecose taps your sensor with NFC once to pair with it directly.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Cluecose lets you photograph a meal so a model can estimate its nutrition.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Cluecose connects to your sensor over Bluetooth so it can detect it, wake on its transmissions, and keep your readings fresh in the background.</string>
 	<key>NSHealthShareUsageDescription</key>

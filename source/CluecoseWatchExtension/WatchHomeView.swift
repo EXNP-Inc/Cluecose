@@ -34,6 +34,7 @@ struct WatchHomeView: View {
                 if let latest = model.latest {
                     hero(latest)
                     metricsRow
+                    foodRow
                 } else {
                     statusBlock
                 }
@@ -137,6 +138,54 @@ struct WatchHomeView: View {
         case .balanced: Color(red: 0.30, green: 0.92, blue: 0.60)
         case .burning: Color(red: 0.45, green: 0.78, blue: 1.0)
         }
+    }
+
+    // Food piggyback: a compact one-line today's-totals summary, with the
+    // latest meal insight shown when present. Hidden when there is nothing.
+    @ViewBuilder
+    private var foodRow: some View {
+        let hasTotals = model.foodKcal != nil || model.foodCarbs != nil || model.foodCaffeine != nil
+        if hasTotals || model.insightText != nil {
+            VStack(alignment: .leading, spacing: 3) {
+                if hasTotals {
+                    HStack(spacing: 4) {
+                        Image(systemName: "fork.knife")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Color(red: 0.30, green: 0.92, blue: 0.60))
+                        Text(foodTotalsText)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                }
+                if let insight = model.insightText, !insight.isEmpty {
+                    Text(insight)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(2)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+        }
+    }
+
+    /// "1234 kcal · 55 g carbs" — whichever of today's totals are present.
+    private var foodTotalsText: String {
+        var parts: [String] = []
+        if let kcal = model.foodKcal {
+            parts.append(String(format: "%.0f kcal", kcal))
+        }
+        if let carbs = model.foodCarbs {
+            parts.append(String(format: "%.0f g carbs", carbs))
+        }
+        if let caffeine = model.foodCaffeine {
+            parts.append(String(format: "%.0f mg caf", caffeine))
+        }
+        return parts.isEmpty ? "Food today" : parts.joined(separator: " · ")
     }
 
     private var statusBlock: some View {

@@ -26,12 +26,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.dp
+import com.dsikic.cluecose.food.FoodLogScreen
+import com.dsikic.cluecose.food.FoodLogSheet
+import com.dsikic.cluecose.food.FoodViewModel
+import com.dsikic.cluecose.food.GlucoseSampleProvider
+import com.dsikic.cluecose.food.PatternsCard
 import com.dsikic.cluecose.libre.RealGlucoseRepository
 import com.dsikic.cluecose.nfc.NfcActivationReader
 import com.dsikic.cluecose.ui.Backdrop
 import com.dsikic.cluecose.ui.CluecoseColors
 import com.dsikic.cluecose.ui.CluecoseUiTheme
+import com.dsikic.cluecose.ui.GlucoseSample
 import com.dsikic.cluecose.ui.GlucoseViewModel
 import com.dsikic.cluecose.ui.HeaderRow
 import com.dsikic.cluecose.ui.ListeningScreen
@@ -60,6 +68,9 @@ class MainActivity : ComponentActivity() {
     /** Same instance the Composable layer renders (shared ViewModelStore). */
     private val viewModel: GlucoseViewModel by viewModels()
 
+    /** The food-log brain (same store as the glucose ViewModel). */
+    private val foodViewModel: FoodViewModel by viewModels()
+
     /** Activity-bound NFC reader (reader mode needs the Activity). */
     private var nfcReader: NfcActivationReader? = null
 
@@ -86,6 +97,12 @@ class MainActivity : ComponentActivity() {
             (viewModel.repository as? RealGlucoseRepository)?.nfcReader = reader
         }
 
+        // Wire the food-log brain to the live glucose series so its per-meal
+        // insights land as samples stream in (iOS `foodLog.attach(self)`).
+        foodViewModel.attach(object : GlucoseSampleProvider {
+            override fun currentSamples(): List<GlucoseSample> = viewModel.state.value.samples
+        })
+
         val pending = requiredPermissions().filter {
             checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED
         }
@@ -99,7 +116,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    CluecoseRoot(viewModel)
+                    CluecoseRoot(viewModel, foodViewModel)
                 }
             }
         }
@@ -145,9 +162,11 @@ class MainActivity : ComponentActivity() {
  * the live main screen, switched on the connection state.
  */
 @Composable
-private fun CluecoseRoot(viewModel: GlucoseViewModel) {
+private fun CluecoseRoot(viewModel: GlucoseViewModel, foodViewModel: FoodViewModel) {
     val state: UiState by viewModel.state.collectAsState()
     var showSettings by remember { mutableStateOf(false) }
+    var showFoodSheet by remember { mutableStateOf(false) }
+    var foodSheetEntry by remember { mutableStateOf<com.dsikic.cluecose.core.food.FoodEntry?>(null) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Backdrop(modifier = Modifier.fillMaxSize())
@@ -169,6 +188,25 @@ private fun CluecoseRoot(viewModel: GlucoseViewModel) {
                 MainScreen(
                     state = state,
                     onUnitChange = viewModel::setUnit,
+                )
+                FoodLogScreen(
+                    viewModel = foodViewModel,
+                    onAdd = {
+                        foodSheetEntry = null
+                        showFoodSheet = true
+                    },
+                    onEdit = { entry ->
+                        foodSheetEntry = entry
+                        showFoodSheet = true
+                    },
+                    onReanalyze = { entry ->
+                        foodViewModel.viewModelScope.launch { foodViewModel.reanalyze(entry) }
+                    },
+                    modifier = Modifier.padding(top = 18.dp),
+                )
+                PatternsCard(
+                    viewModel = foodViewModel,
+                    modifier = Modifier.padding(top = 18.dp),
                 )
             } else {
                 ListeningScreen(
@@ -207,6 +245,17 @@ private fun CluecoseRoot(viewModel: GlucoseViewModel) {
                 onForgetSensor = {
                     showSettings = false
                     viewModel.forgetSensor()
+                },
+            )
+        }
+
+        if (showFoodSheet) {
+            FoodLogSheet(
+                viewModel = foodViewModel,
+                existing = foodSheetEntry,
+                onDismiss = {
+                    showFoodSheet = false
+                    foodSheetEntry = null
                 },
             )
         }

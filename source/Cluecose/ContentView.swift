@@ -5,6 +5,10 @@ import CluecoseCore
 struct ContentView: View {
     @EnvironmentObject var model: GlucoseModel
     @State private var showSettings = false
+    /// The food add/edit sheet: `foodSheetEntry == nil` means "add a new
+    /// meal"; a value means "edit this entry".
+    @State private var showFoodSheet = false
+    @State private var foodSheetEntry: FoodEntry?
     @FocusState private var accountIDFocused: Bool
 
     var body: some View {
@@ -29,6 +33,13 @@ struct ContentView: View {
                         StatsGridCard()
                         historyCard
                         TipsCard()
+                        FoodLogCard(model: model.foodLog,
+                                    onAdd: { foodSheetEntry = nil; showFoodSheet = true },
+                                    onEdit: { entry in
+                                        foodSheetEntry = entry
+                                        showFoodSheet = true
+                                    })
+                        PatternsCard(model: model.foodLog)
                     } else if model.hasPairedSensor {
                         listeningCard
                     }
@@ -53,6 +64,11 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsSheet()
+                .environmentObject(model)
+        }
+        .sheet(isPresented: $showFoodSheet) {
+            FoodLogSheet(model: model.foodLog,
+                         existing: foodSheetEntry)
                 .environmentObject(model)
         }
     }
@@ -580,6 +596,12 @@ struct SettingsSheet: View {
     @EnvironmentObject var model: GlucoseModel
     @Environment(\.dismiss) private var dismiss
     @State private var showClearConfirm = false
+    // Nutrition analysis (LLM) settings.
+    @State private var llmBaseURL = FoodLLMConfig.load().baseURL
+    @State private var llmModel = FoodLLMConfig.load().model
+    @State private var llmAPIKey = FoodLLMConfig.load().apiKey
+    @State private var testResult: String?
+    @State private var isTesting = false
 
     var body: some View {
         NavigationStack {
@@ -610,6 +632,8 @@ struct SettingsSheet: View {
                         LabeledContent("Health app", value: "unavailable")
                     }
                 }
+
+                nutritionSection
 
                 Section("Display") {
                     Toggle(isOn: $model.liveActivityEnabled) {
@@ -651,6 +675,78 @@ struct SettingsSheet: View {
             }
         }
         .preferredColorScheme(.dark)
+    }
+
+    // MARK: Nutrition analysis (LLM) settings
+
+    @ViewBuilder
+    private var nutritionSection: some View {
+        Section("Nutrition analysis") {
+            VStack(alignment: .leading, spacing: 8) {
+                TextField("Base URL", text: $llmBaseURL)
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                TextField("Model", text: $llmModel)
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                SecureField("API key", text: $llmAPIKey)
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.asciiCapable)
+                HStack(spacing: 10) {
+                    Button {
+                        saveLLMConfig()
+                    } label: {
+                        Text("Save")
+                    }
+                    Button {
+                        Task { await testConnection() }
+                    } label: {
+                        if isTesting {
+                            ProgressView()
+                        } else {
+                            Text("Test connection")
+                        }
+                    }
+                    .disabled(isTesting || llmAPIKey.isEmpty)
+                    Spacer()
+                }
+                if let testResult {
+                    Text(testResult)
+                        .font(.caption)
+                        .foregroundStyle(testResult.hasPrefix("OK") ? .green : .orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Text("Your photos and details are sent only to the configured model endpoint for estimation; glucose stays on-device.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func saveLLMConfig() {
+        var cfg = FoodLLMConfig.load()
+        cfg.baseURL = llmBaseURL.trimmingCharacters(in: .whitespaces)
+        cfg.model = llmModel.trimmingCharacters(in: .whitespaces)
+        cfg.apiKey = llmAPIKey
+        cfg.save()
+        testResult = nil
+    }
+
+    private func testConnection() async {
+        saveLLMConfig()
+        isTesting = true
+        defer { isTesting = false }
+        do {
+            let result = try await FoodLLMClient.shared.testConnection()
+            testResult = result
+        } catch {
+            testResult = "Error: \(error.localizedDescription)"
+        }
     }
 }
 

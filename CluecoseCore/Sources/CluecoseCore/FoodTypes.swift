@@ -29,8 +29,10 @@
 //      on reanalysis and stored on the record.
 //    • `citations` — clickable source links a web-grounded estimate can carry.
 //
-//  All branding is Cluecose; no reference to the ported-from product, its
-//  mascot, or any image-generation feature appears anywhere in this module.
+//  All branding is Cluecose. The capabilities here are ported from a
+//  third-party food-diary product, but no name, imagery, or branding of that
+//  product is used, and there is no image-generation feature (photos are
+//  only ever *input* to the nutrition estimate).
 //
 
 import Foundation
