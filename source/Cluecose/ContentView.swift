@@ -123,9 +123,6 @@ struct ContentView: View {
                 }
             }
             Spacer()
-            if model.demoMode {
-                demoBadge
-            }
             unitToggle
             Button {
                 showSettings = true
@@ -163,21 +160,6 @@ struct ContentView: View {
         }
         .padding(3)
         .background(.ultraThinMaterial, in: Capsule())
-    }
-
-    /// Small "Demo" tag shown in the header while demo mode is on, so it's
-    /// obvious the readings are synthetic (simulators have no NFC).
-    private var demoBadge: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "wand.and.stars")
-                .font(.system(size: 9, weight: .bold))
-            Text("Demo")
-                .font(.system(size: 10, weight: .semibold))
-        }
-        .foregroundStyle(.black)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
-        .background(Color(red: 0.35, green: 0.95, blue: 0.65), in: Capsule())
     }
 
     // MARK: Pairing card (first run / takeover)
