@@ -174,6 +174,15 @@ class GattSession(
         // awaits the SAME cert characteristic twice (140 B sensor cert,
         // then 65 B sensor ephemeral). Only the GATT executor thread
         // mutates this (feedFragment, from the live path or the drain).
+        //
+        // [CERT_PARTIAL_CARRYOVER] seeds a fresh cert waiter with chunks a
+        // PREVIOUS attempt's cert stream collected before it lost frames
+        // in flight (the sensor streams the 140 B cert in a ~90 ms burst;
+        // at the 46.8 ms connection interval only 2-3 connection events
+        // carry it, and each attempt loses 2-3 DIFFERENT frames — 20:17/
+        // 20:18/20:19 runs: {[0,3,4,5,6,7]}, {[0,1,2,3,4,6,7]},
+        // {[0,1,2,3,4,7]}. The cert is a static per-patch blob, so the
+        // union of attempts covers all 8 frames within 1-2 tries).
     ) {
         // Per-waiter reassembly state (see the doc above). Plain body
         // properties — a constructor param with an initializer would need an
@@ -384,6 +393,16 @@ class GattSession(
         }
     }
 
+    /**
+     * Drop the cross-attempt sensor-cert chunks for this MAC (static
+     * per-patch blob). Call when starting a FRESH NFC pairing: the sensor
+     * was just re-activated and the next cert stream is authoritative.
+     * Also called on forget. Safe on a fresh session too (no-op).
+     */
+    fun clearCertCarryover() {
+        deviceAddress?.let { clearCertCarryover(it) }
+    }
+
     /** Called on the GATT executor thread. */
     private fun onLinkDropped(status: Int) {
         if (closed) return
@@ -561,6 +580,20 @@ class GattSession(
         val waiter = Waiter(targetId, exactly, latch, System.currentTimeMillis() + FRAGMENT_TIMEOUT_MS)
         pendingWaiter = waiter
 
+        // Cross-attempt cert carryover: seed chunks a previous attempt's
+        // stream collected before it lost frames in flight (see
+        // CERT_CARRYOVER_SIZE doc). Gated to the cert stream itself — the
+        // 65 B sensor-ephemeral on the SAME characteristic must never see
+        // cert chunks. Keyed by MAC, which is unique per patch, so a
+        // different patch (different MAC) starts with an empty map and can
+        // never be polluted by another patch's cert blob.
+        val carryKey: String? = deviceAddress?.uppercase()
+        val certSeed: Map<Int, ByteArray> = if (on == BleCharRef.CERT_HANDSHAKE && exactly == CERT_CARRYOVER_SIZE) {
+            carryKey?.let { certCarryover[it] }?.toMap() ?: emptyMap()
+        } else {
+            emptyMap()
+        }
+
         // Enable notifications for the duration of the wait (idempotent — the
         // sensor keeps the CCCD state across re-arms; later calls are no-ops).
         enableNotificationsSync(char, "awaitNotify(${on.name})")
@@ -574,8 +607,18 @@ class GattSession(
         // notifies: a notify arriving mid-drain is enqueued behind this
         // task and is either fed live (if the waiter is still registered
         // when it runs) or left buffered (if the drain finished the
-        // waiter first) — never lost, never double-fed.
+        // waiter first) — never lost, never double-fed. The carryover
+        // seed joins the same task (waiter state is executor-owned).
         gattExecutor.execute {
+            for ((seq, chunk) in certSeed) {
+                val value = ByteArray(chunk.size + 1)
+                value[0] = seq.toByte()
+                System.arraycopy(chunk, 0, value, 1, chunk.size)
+                feedFragment(targetId, value, waiter)
+            }
+            if (certSeed.isNotEmpty()) {
+                Log.i(TAG, "cert carryover seeded ${certSeed.size} chunks (seqs ${certSeed.keys.sorted()})")
+            }
             drainBuffered(targetId, waiter)
         }
 
@@ -584,6 +627,23 @@ class GattSession(
             if (latch.await(50, TimeUnit.MILLISECONDS)) break
         }
         if (pendingWaiter === waiter) pendingWaiter = null
+
+        // Cert carryover bookkeeping (executor-owned state read after the
+        // latch edge): on success the cert is complete — drop the partial
+        // map (it is now dead weight for this MAC). On timeout, persist
+        // whatever this stream collected so the NEXT attempt (fresh
+        // GattSession, same MAC) starts ahead instead of from zero.
+        if (on == BleCharRef.CERT_HANDSHAKE && exactly == CERT_CARRYOVER_SIZE && carryKey != null) {
+            if (waiter.done) {
+                certCarryover.remove(carryKey)
+            } else {
+                val bucket = certCarryover.getOrPut(carryKey) { java.util.concurrent.ConcurrentHashMap() }
+                for ((seq, chunk) in waiter.receivedChunks) {
+                    bucket.putIfAbsent(seq, chunk)
+                }
+                Log.i(TAG, "cert carryover saved: ${bucket.size} chunks (seqs ${bucket.keys.sorted()}) for $carryKey")
+            }
+        }
 
         val error = waiter.error
         if (error != null) throw error
@@ -900,6 +960,36 @@ class GattSession(
         // status codes; use the int max).
         private const val ACK_FAILED_SENTINEL = Int.MAX_VALUE
         private val CCCD = java.util.UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+        // The 140 B sensor cert (SensorCert.TOTAL_SIZE). The carryover is
+        // keyed to this exact size so the 65 B sensor-ephemeral stream on
+        // the SAME cert characteristic can never pollute it.
+        private const val CERT_CARRYOVER_SIZE = 140
+        // Cross-attempt cert chunks: device address → (seq → payload chunk).
+        // The sensor streams the 140 B cert in a ~90 ms burst; at the
+        // 46.8 ms connection interval only 2-3 connection events carry it
+        // and each fresh-link attempt loses 2-3 DIFFERENT frames in flight
+        // (20:17/20:18/20:19 runs: {[0,3,4,5,6,7]},
+        // {[0,1,2,3,4,6,7]}, {[0,1,2,3,4,7]}) — a per-attempt re-send of
+        // GetCertificate cannot fix that alone. The cert is a static
+        // per-patch blob, so the union of attempts completes it within
+        // 1-2 tries. Lives in the companion because each attempt builds a
+        // FRESH GattSession (RealGlucoseRepository.connectAndAuthorize
+        // loop). Cleared on cert success, on a new NFC pairing (repo), and
+        // on forget.
+        private val certCarryover = java.util.concurrent.ConcurrentHashMap<String, MutableMap<Int, ByteArray>>()
+
+        /**
+         * Drop any stored partial-cert chunks for a (possibly null) MAC.
+         * Called from the repository on forget (the sensor is being
+         * abandoned, its partial cert is dead weight). Accepts a raw MAC or
+         * the repository's normalized form; both are upper-cased before
+         * lookup so a format mismatch can't leave a stale entry behind.
+         * Returns true if an entry was removed.
+         */
+        fun clearCertCarryover(address: String?): Boolean {
+            if (address.isNullOrBlank()) return false
+            return certCarryover.remove(address.uppercase()) != null
+        }
     }
 }
 

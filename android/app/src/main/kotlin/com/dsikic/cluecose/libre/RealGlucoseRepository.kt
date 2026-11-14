@@ -283,6 +283,11 @@ class RealGlucoseRepository(
             runCatching {
                 nfcReader?.stop()
                 teardownSession()
+                // Drop any partial sensor-cert chunks we were accumulating
+                // for the abandoned sensor (static per-patch blob — the
+                // next fresh pairing must start from zero, not from this
+                // patch's half-collected cert).
+                GattSession.clearCertCarryover(state?.bleAddress)
                 reconnecting = false
                 state = null
                 synchronized(storeLock) { sampleStore.clear() }
