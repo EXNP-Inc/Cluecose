@@ -1,0 +1,16 @@
+{
+  "name": "prose",
+  "raw": "Sure, here is the nutrition estimate:\n{\"calories_kcal\": 510, \"protein_g\": 25.0, \"carbs_g\": 60.0, \"fat_g\": 18.0, \"saturated_fat_g\": 6.0, \"sodium_mg\": 900, \"caffeine_mg\": 80, \"alcohol_g\": null, \"description\": \"cafe latte and muffin\", \"citations\": [{\"title\": \"Latte nutrition reference\", \"url\": \"https://example.com/latte\"}, {\"title\": \"Muffin reference\", \"url\": \"https://example.com/muffin\"}]}\nLet me know if you need anything else.",
+  "expect": {
+    "caloriesKcal": 510.0,
+    "proteinG": 25.0,
+    "carbsG": 60.0,
+    "fatG": 18.0,
+    "saturatedFatG": 6.0,
+    "sodiumMg": 900.0,
+    "caffeineMg": 80.0,
+    "alcoholG": null,
+    "description": "cafe latte and muffin",
+    "citationsCount": 2
+  }
+}

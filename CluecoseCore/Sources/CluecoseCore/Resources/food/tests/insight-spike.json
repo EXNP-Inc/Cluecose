@@ -1,0 +1,39 @@
+{
+  "name": "spike",
+  "description": "bagel with cream cheese",
+  "carbsG": 48.0,
+  "baselineWindowMin": 30,
+  "postWindowMin": 180,
+  "spikeThresholdMgdl": 30,
+  "lowThresholdMgdl": 30,
+  "baselineBandMgdl": 10,
+  "mealEpochSeconds": 1730000000,
+  "nowMin": 240,
+  "samples": [
+    {"min": -30, "mgdl": 95},
+    {"min": -20, "mgdl": 95},
+    {"min": -10, "mgdl": 95},
+    {"min": 0, "mgdl": 95},
+    {"min": 10, "mgdl": 105},
+    {"min": 20, "mgdl": 120},
+    {"min": 30, "mgdl": 138},
+    {"min": 40, "mgdl": 152},
+    {"min": 50, "mgdl": 150},
+    {"min": 60, "mgdl": 145},
+    {"min": 90, "mgdl": 120},
+    {"min": 120, "mgdl": 100},
+    {"min": 160, "mgdl": 95},
+    {"min": 180, "mgdl": 95}
+  ],
+  "expect": {
+    "kind": "spike",
+    "baselineMgdl": 95.0,
+    "peakMgdl": 152.0,
+    "peakDeltaMgdl": 57.0,
+    "timeToPeakMin": 40.0,
+    "returnToBaselineMin": 120.0,
+    "minMgdl": 95.0,
+    "minDeltaMgdl": 0.0,
+    "per10gCarbDeltaMgdl": 11.875
+  }
+}

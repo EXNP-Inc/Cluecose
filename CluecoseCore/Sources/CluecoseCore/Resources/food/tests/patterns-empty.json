@@ -1,0 +1,19 @@
+{
+  "name": "empty",
+  "nowEpochSeconds": 1730400000,
+  "inDays": 7,
+  "entries": [],
+  "expect": {
+    "entryCount": 0,
+    "distinctDays": 0,
+    "avgKcalPerDay": null,
+    "avgProteinPerDay": null,
+    "avgCarbsPerDay": null,
+    "avgFatPerDay": null,
+    "avgSodiumPerDay": null,
+    "avgCaffeinePerDay": null,
+    "avgAlcoholPerDay": null,
+    "avgSaturatedFatPerDay": null,
+    "saturatedFatToFatRatio": null
+  }
+}

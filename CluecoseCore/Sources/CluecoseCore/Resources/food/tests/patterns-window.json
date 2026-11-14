@@ -1,0 +1,23 @@
+{
+  "name": "windowFilter",
+  "nowEpochSeconds": 1730400000,
+  "inDays": 7,
+  "entries": [
+    {"dateEpochSeconds": 1730100000, "caloriesKcal": 1000, "proteinG": 30, "carbsG": 60, "fatG": 20, "sodiumMg": 1000, "caffeineMg": 100, "alcoholG": null, "saturatedFatG": 5},
+    {"dateEpochSeconds": 1730200000, "caloriesKcal": 2000, "proteinG": 40, "carbsG": 80, "fatG": 30, "sodiumMg": 2000, "caffeineMg": 200, "alcoholG": 10, "saturatedFatG": 10},
+    {"dateEpochSeconds": 1729000000, "caloriesKcal": 5000, "proteinG": 99, "carbsG": 99, "fatG": 99, "sodiumMg": 9999, "caffeineMg": 999, "alcoholG": 99, "saturatedFatG": 99}
+  ],
+  "expect": {
+    "entryCount": 2,
+    "distinctDays": 2,
+    "avgKcalPerDay": 1500.0,
+    "avgProteinPerDay": 35.0,
+    "avgCarbsPerDay": 70.0,
+    "avgFatPerDay": 25.0,
+    "avgSodiumPerDay": 1500.0,
+    "avgCaffeinePerDay": 150.0,
+    "avgAlcoholPerDay": 10.0,
+    "avgSaturatedFatPerDay": 7.5,
+    "saturatedFatToFatRatio": 0.3
+  }
+}

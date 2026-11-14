@@ -1,0 +1,24 @@
+{
+  "name": "flat_noInsight",
+  "description": "steamed vegetables and chicken",
+  "carbsG": 12.0,
+  "baselineWindowMin": 30,
+  "postWindowMin": 180,
+  "spikeThresholdMgdl": 30,
+  "lowThresholdMgdl": 30,
+  "baselineBandMgdl": 10,
+  "mealEpochSeconds": 1730000000,
+  "nowMin": 240,
+  "samples": [
+    {"min": -30, "mgdl": 100},
+    {"min": -15, "mgdl": 102},
+    {"min": 0, "mgdl": 101},
+    {"min": 30, "mgdl": 112},
+    {"min": 60, "mgdl": 115},
+    {"min": 90, "mgdl": 108},
+    {"min": 120, "mgdl": 104},
+    {"min": 150, "mgdl": 101},
+    {"min": 180, "mgdl": 100}
+  ],
+  "expect": null
+}

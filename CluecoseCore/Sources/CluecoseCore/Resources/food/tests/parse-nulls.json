@@ -1,0 +1,16 @@
+{
+  "name": "nulls",
+  "raw": "{\"calories_kcal\": null, \"protein_g\": null, \"carbs_g\": null, \"fat_g\": null, \"saturated_fat_g\": null, \"sodium_mg\": null, \"caffeine_mg\": null, \"alcohol_g\": null, \"description\": \"plain water\", \"citations\": []}",
+  "expect": {
+    "caloriesKcal": null,
+    "proteinG": null,
+    "carbsG": null,
+    "fatG": null,
+    "saturatedFatG": null,
+    "sodiumMg": null,
+    "caffeineMg": null,
+    "alcoholG": null,
+    "description": "plain water",
+    "citationsCount": 0
+  }
+}

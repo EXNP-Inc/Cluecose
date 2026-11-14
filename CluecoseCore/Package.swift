@@ -15,11 +15,29 @@ let package = Package(
     platforms: [
         .iOS(.v17),
         .watchOS(.v10),
+        // macOS is a TEST-only floor so the pure-Swift core (and its golden
+        // fixture tests) can run with `swift test` on a developer Mac. The
+        // shipped apps still build for iOS/watchOS; nothing runs on macOS.
+        .macOS(.v13),
     ],
     products: [
         .library(name: "CluecoseCore", targets: ["CluecoseCore"]),
     ],
     targets: [
-        .target(name: "CluecoseCore"),
+        .target(
+            name: "CluecoseCore",
+            resources: [
+                // The food feature's shared content: the LLM prompt template
+                // (prompt.txt) and the golden test fixtures (tests/*.json).
+                // These live in the MAIN target so the bundled prompt is
+                // available to the app AND so the fixtures are a single
+                // canonical copy the test target reads.
+                .copy("Resources/food"),
+            ]
+        ),
+        .testTarget(
+            name: "CluecoseCoreTests",
+            dependencies: ["CluecoseCore"]
+        ),
     ]
 )

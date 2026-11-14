@@ -12,3 +12,6 @@ tools/xcodegen/
 # Per-user Xcode state
 **/xcuserdata/
 CluecoseCore/.swiftpm/
+
+# SwiftPM build output
+CluecoseCore/.build/

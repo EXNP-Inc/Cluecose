@@ -1,0 +1,22 @@
+{
+  "name": "noBaseline_noInsight",
+  "description": "first meal of the day, sensor just started",
+  "carbsG": 40.0,
+  "baselineWindowMin": 30,
+  "postWindowMin": 180,
+  "spikeThresholdMgdl": 30,
+  "lowThresholdMgdl": 30,
+  "baselineBandMgdl": 10,
+  "mealEpochSeconds": 1730000000,
+  "nowMin": 240,
+  "samples": [
+    {"min": 0, "mgdl": 95},
+    {"min": 20, "mgdl": 110},
+    {"min": 40, "mgdl": 130},
+    {"min": 70, "mgdl": 150},
+    {"min": 100, "mgdl": 135},
+    {"min": 140, "mgdl": 110},
+    {"min": 180, "mgdl": 100}
+  ],
+  "expect": null
+}

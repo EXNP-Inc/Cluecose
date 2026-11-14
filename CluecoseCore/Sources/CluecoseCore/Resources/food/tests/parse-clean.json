@@ -1,0 +1,16 @@
+{
+  "name": "clean",
+  "raw": "{\"calories_kcal\": 450, \"protein_g\": 20.0, \"carbs_g\": 55.0, \"fat_g\": 15.0, \"saturated_fat_g\": 4.5, \"sodium_mg\": 800, \"caffeine_mg\": null, \"alcohol_g\": null, \"description\": \"turkey sandwich with lettuce\", \"citations\": []}",
+  "expect": {
+    "caloriesKcal": 450.0,
+    "proteinG": 20.0,
+    "carbsG": 55.0,
+    "fatG": 15.0,
+    "saturatedFatG": 4.5,
+    "sodiumMg": 800.0,
+    "caffeineMg": null,
+    "alcoholG": null,
+    "description": "turkey sandwich with lettuce",
+    "citationsCount": 0
+  }
+}

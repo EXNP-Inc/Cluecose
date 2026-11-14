@@ -1,0 +1,35 @@
+{
+  "name": "both_spikeWins",
+  "description": "fryup: eggs, bacon, hash browns",
+  "carbsG": 40.0,
+  "baselineWindowMin": 30,
+  "postWindowMin": 180,
+  "spikeThresholdMgdl": 30,
+  "lowThresholdMgdl": 30,
+  "baselineBandMgdl": 10,
+  "mealEpochSeconds": 1730000000,
+  "nowMin": 240,
+  "samples": [
+    {"min": -30, "mgdl": 90},
+    {"min": -20, "mgdl": 90},
+    {"min": -10, "mgdl": 90},
+    {"min": 0, "mgdl": 90},
+    {"min": 30, "mgdl": 130},
+    {"min": 60, "mgdl": 145},
+    {"min": 90, "mgdl": 120},
+    {"min": 120, "mgdl": 95},
+    {"min": 150, "mgdl": 58},
+    {"min": 180, "mgdl": 62}
+  ],
+  "expect": {
+    "kind": "spike",
+    "baselineMgdl": 90.0,
+    "peakMgdl": 145.0,
+    "peakDeltaMgdl": 55.0,
+    "timeToPeakMin": 60.0,
+    "returnToBaselineMin": 120.0,
+    "minMgdl": 58.0,
+    "minDeltaMgdl": -32.0,
+    "per10gCarbDeltaMgdl": 13.75
+  }
+}

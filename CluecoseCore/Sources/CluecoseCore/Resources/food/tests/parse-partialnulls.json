@@ -1,0 +1,16 @@
+{
+  "name": "partialNulls",
+  "raw": "{\"calories_kcal\": 150, \"protein_g\": null, \"carbs_g\": 30, \"fat_g\": null, \"saturated_fat_g\": null, \"sodium_mg\": null, \"caffeine_mg\": null, \"alcohol_g\": null, \"description\": \"a slice of fruit\", \"citations\": []}",
+  "expect": {
+    "caloriesKcal": 150.0,
+    "proteinG": null,
+    "carbsG": 30.0,
+    "fatG": null,
+    "saturatedFatG": null,
+    "sodiumMg": null,
+    "caffeineMg": null,
+    "alcoholG": null,
+    "description": "a slice of fruit",
+    "citationsCount": 0
+  }
+}
