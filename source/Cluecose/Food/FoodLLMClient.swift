@@ -91,9 +91,20 @@ struct FoodLLMConfig: Codable {
     }
 }
 
+/// The nutrition-estimation dependency, as used by `FoodLogModel`. The real
+/// implementation is `FoodLLMClient`; tests inject a deterministic stub so the
+/// save/analysis logic can be verified without a network.
+protocol FoodEstimating {
+    func estimate(_ request: NutritionPrompt.Request,
+                  photos: [Data]) async throws -> NutritionPrompt.Estimate
+    func fallbackEstimate(description: String,
+                          serving: String?,
+                          context: String?) -> NutritionPrompt.Estimate
+}
+
 /// A minimal OpenAI-compatible client. Stateless per call (config is read
 /// fresh from UserDefaults each time, so Settings edits apply immediately).
-final class FoodLLMClient {
+final class FoodLLMClient: FoodEstimating {
     static let shared = FoodLLMClient()
 
     /// Longest-side target for inlined photos (pixels).

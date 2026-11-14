@@ -153,7 +153,7 @@ struct FoodDetailView: View {
             } else if case .noData = a {
                 noDataState
             } else {
-                flatState
+                settledState
             }
         }
         .glassPanel()
@@ -240,18 +240,20 @@ struct FoodDetailView: View {
         }
     }
 
-    /// Window elapsed, but the engine found nothing insight-worthy.
-    private var flatState: some View {
+    /// The 3 h window has fully elapsed and the analysis ran (or the data
+    /// was too sparse to judge): the result is final — no insight will ever
+    /// appear for this meal. This is a terminal state, not "waiting".
+    private var settledState: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Image(systemName: "minus.circle.fill")
+                Image(systemName: "checkmark.circle.fill")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.5))
-                Text("No notable response")
+                    .foregroundStyle(Color(red: 0.45, green: 0.85, blue: 0.6))
+                Text("Analysis complete — no notable response")
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(.white)
             }
-            Text("Your blood sugar stayed close to your pre-meal level after this meal (within ±30 mg/dL), so there's no spike or dip worth flagging. This is a good response.")
+            Text("We analyzed your blood sugar for \(Int(FoodLogModel.postWindowMin)) minutes after this meal: no spike or dip worth flagging — it stayed within ±30 mg/dL of your pre-meal level, or there wasn't enough pre-meal data to compare against. Nothing to act on here; the analysis for this meal is complete.")
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.65))
                 .fixedSize(horizontal: false, vertical: true)
@@ -288,25 +290,14 @@ struct FoodDetailView: View {
                     .monospacedDigit()
                     .foregroundStyle(.white)
             }
+            // Live while dragging; persisted (debounced) shortly after the
+            // drag settles — this SDK's Slider has no onEditingChanged, so a
+            // plain release-commit isn't observable, and a per-tick write
+            // would hit the store up to 39 times per drag.
             Slider(value: $portion, in: 0.1...4.0, step: 0.1)
                 .onChange(of: portion) { _, newValue in
-                    // Write through immediately: the numbers below the slider
-                    // (and the store) update as the user drags.
-                    var e = entry
-                    e.portionMultiplier = newValue
-                    let scaled = rescaleStored(by: newValue)
-                    e.caloriesKcal = scaled.caloriesKcal
-                    e.proteinG = scaled.proteinG
-                    e.carbsG = scaled.carbsG
-                    e.fatG = scaled.fatG
-                    e.saturatedFatG = scaled.saturatedFatG
-                    e.sodiumMg = scaled.sodiumMg
-                    e.caffeineMg = scaled.caffeineMg
-                    e.alcoholG = scaled.alcoholG
-                    entry = e
-                    Task {
-                        _ = await model.updateEntry(e)
-                    }
+                    applyLivePortion(newValue)
+                    schedulePortionPersist()
                 }
             Text("The estimate describes the full portion; this scales everything above and below to what you actually ate. Changing it re-runs the meal's blood-sugar analysis against the new carb amount.")
                 .font(.caption)
@@ -316,25 +307,63 @@ struct FoodDetailView: View {
         .glassPanel()
     }
 
-    /// Re-derive the scaled values from the unscaled base the store holds.
-    /// (The store's values are base × oldPortion; we need base × newPortion.)
-    private func rescaleStored(by newPortion: Double) -> NutritionPrompt.Estimate {
-        let old = entry.portionMultiplier == 0 ? 1 : entry.portionMultiplier
+    // Debounced persist for the portion slider (see onChange above).
+    @State private var portionPersistTask: Task<Void, Never>?
+    private let portionPersistDebounce: TimeInterval = 0.5
+
+    /// The slider changed: cancel any pending write, and if the change has
+    /// settled for `portionPersistDebounce` seconds, write the entry to the
+    /// store exactly once (which re-arms the insight). The on-screen numbers
+    /// are already updated live by `applyLivePortion`.
+    private func schedulePortionPersist() {
+        portionPersistTask?.cancel()
+        portionPersistTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(portionPersistDebounce))
+            guard !Task.isCancelled else { return }
+            let target = portion
+            let saved = await model.updateEntry(entry)
+            guard !Task.isCancelled else { return }
+            // The user kept moving the slider while the write was in
+            // flight: the local entry is already live-rescaled to the
+            // current position, so just schedule the next write.
+            if saved.portionMultiplier != target {
+                schedulePortionPersist()
+                return
+            }
+            entry = saved
+        }
+    }
+
+    /// A change that happened OUTSIDE the slider (the About-section save)
+    /// must not leave a stale slider write pending.
+    private func cancelPendingPortionPersist() {
+        portionPersistTask?.cancel()
+        portionPersistTask = nil
+    }
+
+    /// While the slider is being dragged: rescale the on-screen numbers
+    /// from the STORE's values (not from the local entry — the local one is
+    /// already mid-rescale, and rescaling it again per tick would compound).
+    /// The store is untouched until the drag commits.
+    private func applyLivePortion(_ newPortion: Double) {
+        guard let stored = model.entries.first(where: { $0.id == entry.id }) else {
+            return
+        }
+        let old = stored.portionMultiplier == 0 ? 1 : stored.portionMultiplier
         let f: (Double?) -> Double? = { v in
             v.map { (($0 / old) * newPortion).rounded() }
         }
-        return NutritionPrompt.Estimate(
-            caloriesKcal: f(entry.caloriesKcal),
-            proteinG: f(entry.proteinG),
-            carbsG: f(entry.carbsG),
-            fatG: f(entry.fatG),
-            saturatedFatG: f(entry.saturatedFatG),
-            sodiumMg: f(entry.sodiumMg),
-            caffeineMg: f(entry.caffeineMg),
-            alcoholG: f(entry.alcoholG),
-            description: nil,
-            citations: []
-        )
+        var e = entry
+        e.portionMultiplier = newPortion
+        e.caloriesKcal = f(stored.caloriesKcal)
+        e.proteinG = f(stored.proteinG)
+        e.carbsG = f(stored.carbsG)
+        e.fatG = f(stored.fatG)
+        e.saturatedFatG = f(stored.saturatedFatG)
+        e.sodiumMg = f(stored.sodiumMg)
+        e.caffeineMg = f(stored.caffeineMg)
+        e.alcoholG = f(stored.alcoholG)
+        entry = e
     }
 
     // MARK: Nutrition
@@ -420,6 +449,7 @@ struct FoodDetailView: View {
     private func commitEdits() async {
         isSaving = true
         defer { isSaving = false }
+        cancelPendingPortionPersist()
         var e = entry
         let values = FoodLogModel.MealValues(
             description: descriptionText,
@@ -438,3 +468,4 @@ struct FoodDetailView: View {
         descriptionText = saved.description
     }
 }
+

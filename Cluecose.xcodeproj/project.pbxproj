@@ -15,6 +15,7 @@
 		29501190F4D484374874CBF9 /* PatternsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F82A45BA2EF361D14861B3D /* PatternsCard.swift */; };
 		322FAC69FFA70F8C43035B88 /* CluecoseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 855AABE40714994CFECFCC4F /* CluecoseCore */; };
 		34A05AE39F91F18C12DBB2ED /* FoodLogCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92B6618B090B30750C4DF50A /* FoodLogCard.swift */; };
+		3B55644A7E5DA4ED08B6D202 /* CluecoseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7CC1528B3FAA6C76E000CE41 /* CluecoseCore */; };
 		424687533307E1FC31805F23 /* CluecoseLiveActivityApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6162FACBECE72ECFC54C1421 /* CluecoseLiveActivityApp.swift */; };
 		4F24354F5ACDD60409B8AED5 /* WatchPusher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81DA60BF7D969B7E8882BED6 /* WatchPusher.swift */; };
 		59484B3CD9BA148792B15F99 /* CluecoseGlucoseAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 241FAD24336A5BC500F3B5E9 /* CluecoseGlucoseAttributes.swift */; };
@@ -32,6 +33,7 @@
 		7D2227D7319FF94B9AFBA010 /* CluecoseApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9BEB6EAF42221D45EDBDB76 /* CluecoseApp.swift */; };
 		937D52F0830B56A9DF7975DF /* CluecoseWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5007C4CBB944FEADA9D5FDEE /* CluecoseWatchApp.swift */; };
 		961B31122D39F1400CF518DE /* CluecoseLiveActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 94F61C085D5C95FB156D5E38 /* CluecoseLiveActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A2BF4158C3EDEE3274EBB59D /* FoodLogModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23C11200511C4F9819814B3D /* FoodLogModelTests.swift */; };
 		A61BC9CF26D600FEC0D7AECD /* WatchGlucoseModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C98BD33AFCED1A8D5079474 /* WatchGlucoseModel.swift */; };
 		A88C69ADBE969E442E84E6FC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 92150EF193F85B429ED12470 /* Assets.xcassets */; };
 		C06FA87607C77DE090154A5B /* FoodLogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22B8E1ABDC4151674AE2C80C /* FoodLogStore.swift */; };
@@ -57,6 +59,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = 6844DC65C0A7F2E8FEB888D4;
 			remoteInfo = CluecoseWatch;
+		};
+		37E04FDFDFCAC210A14BEAC3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 6AC885B8CF4328D1817E391C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0D0DCC1BDC4AFB2E7A27F6AB;
+			remoteInfo = Cluecose;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -90,6 +99,7 @@
 		14A8FC2FF578D2EE2298384A /* GlucoseModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlucoseModel.swift; sourceTree = "<group>"; };
 		22B8E1ABDC4151674AE2C80C /* FoodLogStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodLogStore.swift; sourceTree = "<group>"; };
 		2320D5F796DAAA78175DD689 /* WatchReceiver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchReceiver.swift; sourceTree = "<group>"; };
+		23C11200511C4F9819814B3D /* FoodLogModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodLogModelTests.swift; sourceTree = "<group>"; };
 		241FAD24336A5BC500F3B5E9 /* CluecoseGlucoseAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CluecoseGlucoseAttributes.swift; sourceTree = "<group>"; };
 		3686DFA61C8441C21814B69D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		3C8B11035C88AEE55D612FF7 /* WatchHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchHomeView.swift; sourceTree = "<group>"; };
@@ -111,6 +121,7 @@
 		A6135F46B1599F021CB5C98A /* Cluecose.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Cluecose.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B02DDCCD02360299425C1A1C /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
 		B08618405AAB2753F8DD671D /* LibreDirectReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibreDirectReader.swift; sourceTree = "<group>"; };
+		B6B83EBAE435BB9A1726B414 /* CluecoseTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CluecoseTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C0479789E25D323F5D985660 /* NutritionSleep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionSleep.swift; sourceTree = "<group>"; };
 		C3048089BA4A05883A5A97D5 /* CluecoseTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CluecoseTheme.swift; sourceTree = "<group>"; };
 		C89B7C1E6D5849FF05BED667 /* CluecoseCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = CluecoseCore; path = CluecoseCore; sourceTree = SOURCE_ROOT; };
@@ -147,6 +158,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				03CA1E9046693E7A90029A4C /* CluecoseCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EF7BEA8E6B8951A12E9609F2 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3B55644A7E5DA4ED08B6D202 /* CluecoseCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -190,6 +209,7 @@
 			children = (
 				C1DA7BC4772D3DFC953752C6 /* Cluecose */,
 				BCEE62E21F9F8297B49FA6EC /* CluecoseLiveActivity */,
+				C952B1E911A6EEFE173CC35B /* CluecoseTests */,
 				D51F9197F10EC2441DBE49E8 /* CluecoseWatch */,
 				E104AACEFAAC2472386E0CB9 /* CluecoseWatchExtension */,
 				2E1A448090C3C19E448F1E55 /* LiveActivityShared */,
@@ -202,6 +222,7 @@
 			children = (
 				A6135F46B1599F021CB5C98A /* Cluecose.app */,
 				94F61C085D5C95FB156D5E38 /* CluecoseLiveActivity.appex */,
+				B6B83EBAE435BB9A1726B414 /* CluecoseTests.xctest */,
 				D35DC6762C635BB7449FA41D /* CluecoseWatch.app */,
 			);
 			name = Products;
@@ -260,6 +281,14 @@
 				4CF2E06FB35DA7AD4BD3BFC1 /* LiveActivity */,
 			);
 			path = Cluecose;
+			sourceTree = "<group>";
+		};
+		C952B1E911A6EEFE173CC35B /* CluecoseTests */ = {
+			isa = PBXGroup;
+			children = (
+				23C11200511C4F9819814B3D /* FoodLogModelTests.swift */,
+			);
+			path = CluecoseTests;
 			sourceTree = "<group>";
 		};
 		CC95C4F24A680B8FB22967F1 /* Packages */ = {
@@ -367,6 +396,26 @@
 			productReference = D35DC6762C635BB7449FA41D /* CluecoseWatch.app */;
 			productType = "com.apple.product-type.application";
 		};
+		C6AFCC687FD993E27DC14154 /* CluecoseTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 15F9215FCAA87A629683E16E /* Build configuration list for PBXNativeTarget "CluecoseTests" */;
+			buildPhases = (
+				2FD248F4F2F318432C9705A6 /* Sources */,
+				EF7BEA8E6B8951A12E9609F2 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				FABFDB721AD3D755B174D6F7 /* PBXTargetDependency */,
+			);
+			name = CluecoseTests;
+			packageProductDependencies = (
+				7CC1528B3FAA6C76E000CE41 /* CluecoseCore */,
+			);
+			productName = CluecoseTests;
+			productReference = B6B83EBAE435BB9A1726B414 /* CluecoseTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -385,6 +434,10 @@
 						ProvisioningStyle = Automatic;
 					};
 					6844DC65C0A7F2E8FEB888D4 = {
+						DevelopmentTeam = Q53D65KB4X;
+						ProvisioningStyle = Automatic;
+					};
+					C6AFCC687FD993E27DC14154 = {
 						DevelopmentTeam = Q53D65KB4X;
 						ProvisioningStyle = Automatic;
 					};
@@ -409,6 +462,7 @@
 			projectRoot = "";
 			targets = (
 				0D0DCC1BDC4AFB2E7A27F6AB /* Cluecose */,
+				C6AFCC687FD993E27DC14154 /* CluecoseTests */,
 				462FEFD14AE089229BA3AD97 /* CluecoseLiveActivity */,
 				6844DC65C0A7F2E8FEB888D4 /* CluecoseWatch */,
 			);
@@ -450,6 +504,14 @@
 				59484B3CD9BA148792B15F99 /* CluecoseGlucoseAttributes.swift in Sources */,
 				424687533307E1FC31805F23 /* CluecoseLiveActivityApp.swift in Sources */,
 				197C0C686253C220A94C17D9 /* GlucoseViews.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2FD248F4F2F318432C9705A6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A2BF4158C3EDEE3274EBB59D /* FoodLogModelTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -502,9 +564,33 @@
 			target = 6844DC65C0A7F2E8FEB888D4 /* CluecoseWatch */;
 			targetProxy = 18092149DF39C45A6CE7A32C /* PBXContainerItemProxy */;
 		};
+		FABFDB721AD3D755B174D6F7 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 0D0DCC1BDC4AFB2E7A27F6AB /* Cluecose */;
+			targetProxy = 37E04FDFDFCAC210A14BEAC3 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		0143A26DD4FD7773BB942F33 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.dsikic.cluecose.tests;
+				SDKROOT = iphoneos;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cluecose.app/Cluecose";
+			};
+			name = Debug;
+		};
 		0D6CC2E1457A284EA8F92B58 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -590,6 +676,25 @@
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
+		};
+		3344CC9E6639C5DB9E07594A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.dsikic.cluecose.tests;
+				SDKROOT = iphoneos;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cluecose.app/Cluecose";
+			};
+			name = Release;
 		};
 		7AA11960819DC0A101024C96 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -760,6 +865,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
+		15F9215FCAA87A629683E16E /* Build configuration list for PBXNativeTarget "CluecoseTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0143A26DD4FD7773BB942F33 /* Debug */,
+				3344CC9E6639C5DB9E07594A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		942314823E1F295AE92DF0EB /* Build configuration list for PBXNativeTarget "CluecoseLiveActivity" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -816,6 +930,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 9E2F0E9A20E84BD93CB082A2 /* XCRemoteSwiftPackageReference "LibreCRKit" */;
 			productName = LibreCRKit;
+		};
+		7CC1528B3FAA6C76E000CE41 /* CluecoseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CluecoseCore;
 		};
 		855AABE40714994CFECFCC4F /* CluecoseCore */ = {
 			isa = XCSwiftPackageProductDependency;

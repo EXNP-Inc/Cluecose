@@ -45,10 +45,10 @@ final class FoodLogModel: ObservableObject {
 
     /// The app model, for the merged glucose series used by the insight engine.
     private weak var glucoseModel: GlucoseModel?
-    /// Persistence (UserDefaults + photo files).
-    let store = FoodLogStore()
-    /// The LLM endpoint client (stateless; reads config per call).
-    private let llm = FoodLLMClient.shared
+    /// Persistence (UserDefaults + photo files). Injectable for tests.
+    let store: FoodLogStore
+    /// The nutrition estimator (real: the LLM client; tests: a stub).
+    private let llm: FoodEstimating
 
     /// How often the lightweight recompute timer may run (seconds).
     private let recomputeInterval: TimeInterval = 120
@@ -56,7 +56,10 @@ final class FoodLogModel: ObservableObject {
     private var recomputeTimer: Timer?
     private var sampleObserver: AnyCancellable?
 
-    init() {
+    init(store: FoodLogStore = FoodLogStore(),
+         llm: FoodEstimating = FoodLLMClient.shared) {
+        self.store = store
+        self.llm = llm
         entries = store.all()
     }
 
@@ -126,14 +129,15 @@ final class FoodLogModel: ObservableObject {
     ///  • `.pending` — the post-meal window hasn't fully elapsed yet: the
     ///    curve is still forming, and the analysis will run (and the insight
     ///    appear) at `readyAt`, about `remainingMin` from now.
-    ///  • `.notYet`  — the meal is still inside the pre/post window but the
-    ///    baseline hasn't been established either (meal just logged); same
-    ///    readiness instant as `.pending`.
+    ///  • `.settled` — the window has fully elapsed and the engine ran (or
+    ///    found the curve flat / the data too sparse to judge): no insight
+    ///    will ever appear for this meal.
     ///  • `.noData`  — the app has no glucose series at all (no sensor data
     ///    and not in demo mode), so nothing can be analyzed yet.
     enum MealAnalytics: Equatable {
         case ready
         case pending(readyAt: Date, remainingMin: Int)
+        case settled
         case noData
 
         /// True while the insight is still being awaited (not yet computed).
@@ -151,19 +155,35 @@ final class FoodLogModel: ObservableObject {
 
     /// Compute the analytics state for `entry` right now.
     func analytics(for entry: FoodEntry, now: Date = Date()) -> MealAnalytics {
-        if entry.insight != nil { return .ready }
-        guard let samples = glucoseModel?.allSamples, !samples.isEmpty else {
-            return .noData
-        }
-        let readyAt = entry.date.addingTimeInterval(Self.postWindowMin * 60)
+        Self.analyticsState(insight: entry.insight,
+                            hasSamples: !(glucoseModel?.allSamples ?? []).isEmpty,
+                            mealDate: entry.date,
+                            now: now)
+    }
+
+    /// The pure decision (kept out of the instance so it is unit-testable
+    /// without a glucose model):
+    ///
+    ///  • insight present            → `.ready`
+    ///  • no glucose series at all   → `.noData`
+    ///  • window still forming       → `.pending(readyAt, remainingMin)`
+    ///  • window fully elapsed       → `.settled` (terminal: the engine is
+    ///    "final only", so once it has run the result sticks — flat or
+    ///    sparse curves yield no insight, ever)
+    static func analyticsState(insight: MealInsight?,
+                               hasSamples: Bool,
+                               mealDate: Date,
+                               now: Date,
+                               windowMin: Double = MealInsightEngine.Config.default.postWindowMin) -> MealAnalytics {
+        if insight != nil { return .ready }
+        guard hasSamples else { return .noData }
+        let readyAt = mealDate.addingTimeInterval(windowMin * 60)
         let remaining = readyAt.timeIntervalSince(now)
         if remaining > 0 {
             return .pending(readyAt: readyAt,
                             remainingMin: Int((remaining / 60).rounded(.up)))
         }
-        // Window elapsed but no insight yet: the engine found the response
-        // wasn't insight-worthy (flat curve), or the recompute hasn't run.
-        return .ready
+        return .settled
     }
 
     // MARK: Save / re-analyze
@@ -197,21 +217,25 @@ final class FoodLogModel: ObservableObject {
     }
 
     /// Save a meal, for a NEW entry or an EDIT of `existing`. This is the
-    /// ONLY save path — saving always runs the analysis:
+    /// ONLY save path — saving always keeps the entry analyzed:
     ///
-    ///  • The model endpoint (or its local keyword fallback when the endpoint
-    ///    is unreachable) produces a base estimate of the FULL described
-    ///    portion, scaled by `values.portionMultiplier` (0.1…4.0).
-    ///  • The user's hand-edited nutrient rows are respected verbatim — the
-    ///    user is in control.
-    ///  • A change to the description / serving / context / source re-runs the
-    ///    analysis immediately; the portion slider rescales the stored
-    ///    estimate without re-calling the model (instant).
+    ///  • The meal's description / serving / context / source changed → run a
+    ///    fresh estimate (model endpoint, or its local keyword fallback when
+    ///    the endpoint is unreachable) of the FULL described portion, scaled
+    ///    by `values.portionMultiplier` (0.1…4.0).
+    ///  • Same meal, anything else changed (rows, portion) → NO LLM call and
+    ///    NO rescaling of what the entry already has: values the user
+    ///    corrected by hand must not be multiplied by a portion, so they are
+    ///    kept verbatim (the detail slider still rescales the entry's values
+    ///    live before it calls here — see `FoodDetailView`).
+    ///  • The user's hand-edited nutrient rows (non-nil in `values`) always
+    ///    override whatever the analysis produced.
     ///  • A meal with no data at all (no nutrient values AND no photos)
     ///    cannot be saved — it is returned unchanged and NOT persisted.
     ///
     /// Photos in `photos` replace the entry's stored photos (old files are
-    /// removed); for manual entries pass an empty array. The entry's date is
+    /// removed) — but only when the photo set actually changed, so a save
+    /// that doesn't touch photos rewrites nothing. The entry's date is
     /// preserved on edit and is "now" for new entries.
     @discardableResult
     func saveEntry(existing: FoodEntry?,
@@ -238,14 +262,44 @@ final class FoodLogModel: ObservableObject {
         )
         entry.citations = values.citations.isEmpty ? (current?.citations ?? existing?.citations) : values.citations
 
-        // ---- Analyze (always on save) ------------------------------------
-        let analysisChanged = current == nil
+        // ---- Gate (up front): a NEW meal needs some data of its own -------
+        // (a non-empty description, a photo, or a hand-entered row). Without
+        // any of that there is nothing to analyze — and the analysis must
+        // not be allowed to manufacture a "Meal" out of nothing. (Existing
+        // entries already carry data by definition: they're in the store.)
+        if current == nil {
+            let hasDescription = !values.description
+                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let hasPhotos = values.source == .photo && !photos.isEmpty
+            let hasRows = [values.caloriesKcal, values.proteinG, values.carbsG,
+                           values.fatG, values.saturatedFatG, values.sodiumMg,
+                           values.caffeineMg, values.alcoholG]
+                .contains { $0 != nil }
+            guard hasDescription || hasPhotos || hasRows else { return entry }
+        }
+
+        // ---- Analyze (the meal's nutrition comes from the analysis) -------
+        //
+        // Three cases, in order of preference:
+        //
+        // 1. The meal was actually re-described (description / serving /
+        //    context / source changed vs the stored entry) → run a fresh
+        //    estimate (model endpoint, local keyword fallback when it is
+        //    down) of the FULL described portion.
+        // 2. Same meal → NO LLM call. If the portion moved, every value the
+        //    entry has is rescaled (÷ old × new) — the slider is about the
+        //    whole meal ("how much of it did you eat"), whether the values
+        //    were estimated or typed by hand. If it didn't move, the values
+        //    round-trip verbatim, so an unchanged save is a no-op.
+        // 3. A new entry with no analysis inputs produced nothing → the gate
+        //    below refuses to persist it.
+        let descriptionChanged = current == nil
             || current?.description != entry.description
             || current?.serving != values.serving
             || current?.context != values.context
             || current?.source != values.source
-        let estimate: NutritionPrompt.Estimate
-        if analysisChanged {
+
+        if descriptionChanged {
             let request = NutritionPrompt.Request(
                 description: entry.description,
                 serving: values.serving,
@@ -256,9 +310,12 @@ final class FoodLogModel: ObservableObject {
                     : (current?.photoFileNames.count ?? 0)
             )
             let photosToSend = values.source == .photo ? photos : []
-            // Model first; local keyword fallback when the endpoint is down.
-            // (isEstimating drives the Save-button spinner while in flight.)
+            // Model first; local keyword fallback when the endpoint is down
+            // (the fallback never throws, so a meal with a description can
+            // always be analyzed offline). (isEstimating drives the
+            // Save-button spinner while in flight.)
             isEstimating = true
+            let estimate: NutritionPrompt.Estimate
             do {
                 estimate = try await llm.estimate(request, photos: photosToSend)
             } catch {
@@ -267,45 +324,55 @@ final class FoodLogModel: ObservableObject {
                                                 context: request.context)
             }
             isEstimating = false
-            // A fresh photo estimate may rename the meal (its own description).
+            apply(scaled(estimate, by: values.portionMultiplier), to: &entry)
+            entry.isEstimated = true
+            // A fresh photo estimate may rename the meal (its own
+            // description).
             if values.source == .photo, let d = estimate.description,
                !d.isEmpty, values.description.isEmpty {
                 entry.description = d
             }
-        } else {
-            // Same analysis inputs: recover the unscaled base from the STORED
-            // (already scaled) values, then rescale below if the portion
-            // changed.
-            let base: (Double?) -> Double? = { v in
-                v.map { $0 / ((current?.portionMultiplier) ?? 1.0) }
+        } else if let current {
+            // Same meal: no LLM call, no re-estimation. Materialize the
+            // stored values onto the entry so it is always a complete,
+            // savable record (an unchanged save is an idempotent round-trip,
+            // never a data-loss no-op). The portion slider is about the
+            // WHOLE meal — "how much of it did you eat" — so when it moved,
+            // every value is rescaled (÷ old × new), whether estimated or
+            // typed by hand; when it didn't move, they pass through as-is.
+            let oldPortion = current.portionMultiplier == 0 ? 1 : current.portionMultiplier
+            let newPortion = values.portionMultiplier == 0 ? 1 : values.portionMultiplier
+            let s: (Double?) -> Double? = { v in
+                guard oldPortion != newPortion else { return v }
+                return v.map { (($0 / oldPortion) * newPortion).rounded() }
             }
-            estimate = NutritionPrompt.Estimate(
-                caloriesKcal: base(current?.caloriesKcal),
-                proteinG: base(current?.proteinG),
-                carbsG: base(current?.carbsG),
-                fatG: base(current?.fatG),
-                saturatedFatG: base(current?.saturatedFatG),
-                sodiumMg: base(current?.sodiumMg),
-                caffeineMg: base(current?.caffeineMg),
-                alcoholG: base(current?.alcoholG),
-                description: nil,
-                citations: values.citations
-            )
+            entry.caloriesKcal = s(current.caloriesKcal)
+            entry.proteinG = s(current.proteinG)
+            entry.carbsG = s(current.carbsG)
+            entry.fatG = s(current.fatG)
+            entry.saturatedFatG = s(current.saturatedFatG)
+            entry.sodiumMg = s(current.sodiumMg)
+            entry.caffeineMg = s(current.caffeineMg)
+            entry.alcoholG = s(current.alcoholG)
+            entry.isEstimated = current.isEstimated
         }
-        apply(scaled(estimate, by: values.portionMultiplier), to: &entry)
-        entry.isEstimated = true
+        // Otherwise: a new entry whose (degenerate) estimate produced
+        // nothing — the gate below decides whether it can exist at all.
 
         // ---- Honor the user's hand-edited rows ---------------------------
-        // Every row the user explicitly entered (non-nil) overrides the
-        // estimate; blank rows keep the (scaled) estimate.
-        if let v = values.caloriesKcal { entry.caloriesKcal = v }
-        if let v = values.proteinG { entry.proteinG = v }
-        if let v = values.carbsG { entry.carbsG = v }
-        if let v = values.fatG { entry.fatG = v }
-        if let v = values.saturatedFatG { entry.saturatedFatG = v }
-        if let v = values.sodiumMg { entry.sodiumMg = v }
-        if let v = values.caffeineMg { entry.caffeineMg = v }
-        if let v = values.alcoholG { entry.alcoholG = v }
+        // The sheet's rows are values of the FULL described portion (its
+        // prefill divides the stored value by the portion). Like the
+        // estimate, a hand-entered row is scaled by the portion to become
+        // what the user actually ate.
+        let p = values.portionMultiplier == 0 ? 1 : values.portionMultiplier
+        if let v = values.caloriesKcal { entry.caloriesKcal = (v * p).rounded() }
+        if let v = values.proteinG { entry.proteinG = (v * p).rounded() }
+        if let v = values.carbsG { entry.carbsG = (v * p).rounded() }
+        if let v = values.fatG { entry.fatG = (v * p).rounded() }
+        if let v = values.saturatedFatG { entry.saturatedFatG = (v * p).rounded() }
+        if let v = values.sodiumMg { entry.sodiumMg = (v * p).rounded() }
+        if let v = values.caffeineMg { entry.caffeineMg = (v * p).rounded() }
+        if let v = values.alcoholG { entry.alcoholG = (v * p).rounded() }
 
         // ---- Gate: no data at all -> not savable --------------------------
         // (The sheet blocks the button too; this is the model-level
@@ -318,16 +385,32 @@ final class FoodLogModel: ObservableObject {
         guard hasNutrition || hasPhotos else { return entry }
 
         // ---- Photos --------------------------------------------------------
-        // Replace stored photos: drop the old files, write the new ones under
-        // the stable `{id}_{index}.jpg` names.
-        store.deletePhotos(for: id)
-        var names: [String] = []
-        if values.source == .photo {
-            for (i, data) in photos.enumerated() {
-                names.append(store.savePhoto(data, for: id, index: i))
-            }
+        // The photo set is rewritten ONLY when it actually changed (different
+        // count or any file's bytes differ). Saving a meal whose photos are
+        // untouched must not re-encode its files on disk.
+        let storedNames = current?.photoFileNames ?? []
+        let storedData: [Data] = values.source == .photo
+            ? storedNames.compactMap { try? Data(contentsOf: store.photoURL($0)) }
+            : []
+        let photosUnchanged: Bool
+        if values.source != .photo {
+            photosUnchanged = storedNames.isEmpty && photos.isEmpty
+        } else {
+            photosUnchanged = photos.count == storedData.count
+                && zip(photos, storedData).allSatisfy { $0 == $1 }
         }
-        entry.photoFileNames = names
+        if photosUnchanged {
+            entry.photoFileNames = storedNames
+        } else {
+            store.deletePhotos(for: id)
+            var names: [String] = []
+            if values.source == .photo {
+                for (i, data) in photos.enumerated() {
+                    names.append(store.savePhoto(data, for: id, index: i))
+                }
+            }
+            entry.photoFileNames = names
+        }
 
         // Editing the meal re-arms its insight: the curve is re-evaluated
         // against the (possibly new) carb value once the window allows.
@@ -357,20 +440,19 @@ final class FoodLogModel: ObservableObject {
     }
 
     /// The `MealValues` equivalent of an entry (for `updateEntry`).
+    /// The nutrient rows are nil ON PURPOSE: the detail view's rows are
+    /// read-only, and passing the entry's (already-portion-scaled) values as
+    /// rows would scale them by the portion a second time. The rescale
+    /// branch owns the values; only the description/serving/context (which
+    /// may have been edited there) can trigger a re-estimate.
     func values(from entry: FoodEntry) -> MealValues {
         MealValues(
             description: entry.description,
             serving: entry.serving,
             context: entry.context,
             source: entry.source,
-            caloriesKcal: entry.caloriesKcal,
-            proteinG: entry.proteinG,
-            carbsG: entry.carbsG,
-            fatG: entry.fatG,
-            saturatedFatG: entry.saturatedFatG,
-            sodiumMg: entry.sodiumMg,
-            caffeineMg: entry.caffeineMg,
-            alcoholG: entry.alcoholG,
+            caloriesKcal: nil, proteinG: nil, carbsG: nil, fatG: nil,
+            saturatedFatG: nil, sodiumMg: nil, caffeineMg: nil, alcoholG: nil,
             citations: entry.citations ?? [],
             portionMultiplier: entry.portionMultiplier
         )

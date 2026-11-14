@@ -67,6 +67,12 @@ struct FoodLogSheet: View {
     @State private var sodiumText = ""
     @State private var caffeineText = ""
     @State private var alcoholText = ""
+    /// The text the rows had when the sheet opened (edit mode: the stored
+    /// values, unscaled; new meal: empty). A row whose text is UNCHANGED is
+    /// not a hand edit — it is passed as nil so the analysis/estimate keeps
+    /// ownership of it. (Re-saving an untouched entry must round-trip the
+    /// stored values exactly, including the portion scaling.)
+    @State private var rowOrigins = [String](repeating: "", count: 8)
 
     // Estimate results (informational — filling happens on save)
     @State private var modelDescription = ""
@@ -230,7 +236,10 @@ struct FoodLogSheet: View {
         }
         .fullScreenCover(isPresented: $showCamera) {
             CameraCapture { data in
-                guard photos.count < 5 else { return }
+                guard photos.count < 5 else {
+                    errorMessage = "Already at 5 photos — remove one to add this one."
+                    return
+                }
                 photos.insert(data, at: 0)
             }
         }
@@ -381,14 +390,15 @@ struct FoodLogSheet: View {
             serving: servingText.isEmpty ? nil : servingText,
             context: contextText.isEmpty ? nil : contextText,
             source: mode == .photo ? .photo : .manual,
-            caloriesKcal: parse(kcalText),
-            proteinG: parse(proteinText),
-            carbsG: parse(carbsText),
-            fatG: parse(fatText),
-            saturatedFatG: parse(satFatText),
-            sodiumMg: parse(sodiumText),
-            caffeineMg: parse(caffeineText),
-            alcoholG: parse(alcoholText),
+            // nil = "user didn't touch this row" → the analyzed value stays.
+            caloriesKcal: rowValue(kcalText, origin: rowOrigins[0]),
+            proteinG: rowValue(proteinText, origin: rowOrigins[1]),
+            carbsG: rowValue(carbsText, origin: rowOrigins[2]),
+            fatG: rowValue(fatText, origin: rowOrigins[3]),
+            saturatedFatG: rowValue(satFatText, origin: rowOrigins[4]),
+            sodiumMg: rowValue(sodiumText, origin: rowOrigins[5]),
+            caffeineMg: rowValue(caffeineText, origin: rowOrigins[6]),
+            alcoholG: rowValue(alcoholText, origin: rowOrigins[7]),
             citations: citations,
             portionMultiplier: portion
         )
@@ -405,6 +415,16 @@ struct FoodLogSheet: View {
 
     private func parse(_ text: String) -> Double? {
         Double(text.trimmingCharacters(in: .whitespaces))
+    }
+
+    /// The parsed value of a nutrient row — or nil when the user left it
+    /// exactly as pre-filled (so the saved/analyzed value owns it). A row
+    /// that was pre-filled empty and is now filled is a hand edit; a
+    /// pre-filled row set back to its original text is not.
+    private func rowValue(_ text: String, origin: String) -> Double? {
+        text.trimmingCharacters(in: .whitespaces) == origin
+            ? nil
+            : parse(text)
     }
 
     /// Format a stored value back into the row's text field. Uses a
@@ -459,6 +479,9 @@ struct FoodLogSheet: View {
             sodiumText = number(f(e.sodiumMg))
             caffeineText = number(f(e.caffeineMg))
             alcoholText = number(f(e.alcoholG))
+            // Remember what "untouched" looks like, per row.
+            rowOrigins = [kcalText, proteinText, carbsText, fatText,
+                          satFatText, sodiumText, caffeineText, alcoholText]
             citations = e.citations ?? []
             if e.source == .photo {
                 photos = model.store.photoData(for: e)

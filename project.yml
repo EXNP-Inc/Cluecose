@@ -53,6 +53,24 @@ targets:
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
 
+  # App-level unit tests: the food-log save/analysis/analytics logic against
+  # a stub estimator and an in-memory store (no network, no health data).
+  CluecoseTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - source/CluecoseTests
+    dependencies:
+      - target: Cluecose
+      - package: CluecoseCore
+        product: CluecoseCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dsikic.cluecose.tests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+        IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+
   # Live Activity extension: renders the glucose Dynamic Island + Lock Screen
   # activity. The phone app owns the activities (ActivityKit); the paired
   # Apple Watch inherits them automatically.
@@ -111,6 +129,10 @@ schemes:
         CluecoseLiveActivity: all
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - CluecoseTests
   CluecoseWatch:
     build:
       targets:

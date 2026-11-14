@@ -28,7 +28,13 @@ final class FoodLogStore {
     /// Subdirectory (inside Documents) holding the meal photo files.
     static let photosDirectoryName = "photos"
 
-    private let defaults = UserDefaults.standard
+    /// Injectable for tests (a suite-scoped `UserDefaults`); production uses
+    /// `.standard` — the same store the Android port reads.
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
 
     // MARK: Photos directory
 
@@ -41,7 +47,8 @@ final class FoodLogStore {
         return dir
     }
 
-    private func photoURL(_ fileName: String) -> URL {
+    /// The URL of a stored photo file (the file may not exist yet).
+    func photoURL(_ fileName: String) -> URL {
         Self.photosDirectory.appendingPathComponent(fileName)
     }
 
