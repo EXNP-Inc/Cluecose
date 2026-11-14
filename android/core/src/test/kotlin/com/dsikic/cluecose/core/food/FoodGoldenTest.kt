@@ -401,6 +401,7 @@ class FoodEntryCodableTests {
             context = "extra cheese, no salsa",
             source = FoodSource.PHOTO,
             photoFileNames = listOf("a.jpg", "b.jpg"),
+            portionMultiplier = 1.5,
             caloriesKcal = 650.0, proteinG = 35.0, carbsG = 50.0, fatG = 30.0,
             sodiumMg = 1100.0, caffeineMg = null, alcoholG = null, saturatedFatG = 12.0,
             citations = listOf(SourceCitation(title = "Burrito ref", url = "https://ref.example/burrito")),
@@ -414,6 +415,7 @@ class FoodEntryCodableTests {
         check(back.context == "extra cheese, no salsa")
         check(back.source == FoodSource.PHOTO)
         check(back.photoFileNames == listOf("a.jpg", "b.jpg"))
+        checkClose(back.portionMultiplier, 1.5)
         checkClose(back.caloriesKcal, 650.0)
         checkClose(back.proteinG, 35.0)
         checkClose(back.carbsG, 50.0)
@@ -426,6 +428,25 @@ class FoodEntryCodableTests {
         check(cits != null && cits.size == 1)
         check(cits!!.first().url == "https://ref.example/burrito")
         check(back.isEstimated)
+
+        // The key is always encoded (even for the 1.0 default) so the schema
+        // is stable on both platforms.
+        val obj = FoodJson.instance.parseToJsonElement(json).jsonObject
+        checkClose(obj["portionMultiplier"]?.jsonPrimitive?.let { it.doubleOrNull ?: it.longOrNull?.toDouble() }, 1.5)
+    }
+
+    @Test
+    fun portionMultiplierDefaultsToOneWhenAbsent() {
+        // A record written before the multiplier existed must decode with a
+        // full portion (1.0), and re-encoding must now carry the key.
+        val legacy = """
+            {"id":"y","dateEpochSeconds":123,"description":"legacy meal","source":"manual","caloriesKcal":300}
+        """.trimIndent()
+        val e = FoodJson.instance.decodeFromString(FoodEntrySerializer, legacy)
+        checkClose(e.portionMultiplier, 1.0)
+        val re = FoodJson.instance.encodeToString(FoodEntrySerializer, e)
+        val obj = FoodJson.instance.parseToJsonElement(re).jsonObject
+        checkClose(obj["portionMultiplier"]?.jsonPrimitive?.let { it.doubleOrNull ?: it.longOrNull?.toDouble() }, 1.0)
     }
 
     @Test

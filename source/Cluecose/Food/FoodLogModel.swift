@@ -14,6 +14,13 @@
 //  • Nutrition-sleep is iOS-only (HealthKit sleep) and emits ASSOCIATION, not
 //    causation, strings.
 //
+//  Saving is the analysis: `saveEntry` is the only save path (the sheet and
+//  the detail view both funnel through it). Saving always runs the estimate
+//  (model endpoint, or the local keyword fallback when the endpoint is
+//  unreachable), scales it by the portion multiplier, honors the user's
+//  hand-edited rows, and re-arms the per-meal insight. A meal with no data at
+//  all (no nutrient values AND no photos) cannot be saved.
+//
 
 import Foundation
 import Combine
@@ -105,115 +112,288 @@ final class FoodLogModel: ObservableObject {
             .last?.text
     }
 
-    // MARK: LLM estimation
+    // MARK: Meal analytics state (per-meal blood-sugar insight)
 
-    /// Log a meal typed by hand: description -> LLM estimate -> stored entry
-    /// (isEstimated=true). Throws if the estimate fails or is empty, so the
-    /// sheet can fall back to manual value entry.
-    func addManual(description: String,
-                  serving: String?,
-                  context: String?,
-                  at date: Date = Date()) async throws {
-        isEstimating = true
-        defer { isEstimating = false }
-        let request = NutritionPrompt.Request(
-            description: description,
-            serving: serving,
-            context: context,
-            mode: .manual,
-            photoCount: 0
-        )
-        let estimate = try await llm.estimate(request)
-        var entry = FoodEntry(
-            dateEpochSeconds: date.timeIntervalSince1970,
-            description: description,
-            serving: serving,
-            context: context,
-            source: .manual,
-            isEstimated: true
-        )
-        apply(estimate, to: &entry)
-        store.add(entry)
-        refresh()
-        recomputeInsights(force: false)
+    /// The engine's post-meal analysis window, in minutes. The meal's glucose
+    /// response can only be judged once this whole window has elapsed
+    /// ("final only" — see `MealInsightEngine`), so the UI can tell the user
+    /// exactly WHEN the analysis lands and WHAT it will do.
+    static var postWindowMin: Double { MealInsightEngine.Config.default.postWindowMin }
+
+    /// The per-meal analytics state for one entry, as of `now`:
+    ///
+    ///  • `.ready`   — the insight has been computed and is on the entry.
+    ///  • `.pending` — the post-meal window hasn't fully elapsed yet: the
+    ///    curve is still forming, and the analysis will run (and the insight
+    ///    appear) at `readyAt`, about `remainingMin` from now.
+    ///  • `.notYet`  — the meal is still inside the pre/post window but the
+    ///    baseline hasn't been established either (meal just logged); same
+    ///    readiness instant as `.pending`.
+    ///  • `.noData`  — the app has no glucose series at all (no sensor data
+    ///    and not in demo mode), so nothing can be analyzed yet.
+    enum MealAnalytics: Equatable {
+        case ready
+        case pending(readyAt: Date, remainingMin: Int)
+        case noData
+
+        /// True while the insight is still being awaited (not yet computed).
+        var isPending: Bool {
+            if case .pending = self { return true }
+            return false
+        }
+
+        /// The instant the insight will be computed (window elapsed).
+        var readyAt: Date? {
+            if case .pending(let at, _) = self { return at }
+            return nil
+        }
     }
 
-    /// Log a meal from photos: vision LLM estimate -> stored entry with the
-    /// photos persisted to Documents/`photos`. The model's own description is
-    /// used to prefill when the user left the description empty.
-    func addPhoto(description: String?,
-                 serving: String?,
-                 context: String?,
-                 photos: [Data],
-                 at date: Date = Date()) async throws {
+    /// Compute the analytics state for `entry` right now.
+    func analytics(for entry: FoodEntry, now: Date = Date()) -> MealAnalytics {
+        if entry.insight != nil { return .ready }
+        guard let samples = glucoseModel?.allSamples, !samples.isEmpty else {
+            return .noData
+        }
+        let readyAt = entry.date.addingTimeInterval(Self.postWindowMin * 60)
+        let remaining = readyAt.timeIntervalSince(now)
+        if remaining > 0 {
+            return .pending(readyAt: readyAt,
+                            remainingMin: Int((remaining / 60).rounded(.up)))
+        }
+        // Window elapsed but no insight yet: the engine found the response
+        // wasn't insight-worthy (flat curve), or the recompute hasn't run.
+        return .ready
+    }
+
+    // MARK: Save / re-analyze
+
+    /// The structured values the sheet collects from its editable rows.
+    struct MealValues {
+        var description: String = ""
+        var serving: String? = nil
+        var context: String? = nil
+        var source: FoodEntry.Source = .manual
+        var caloriesKcal: Double? = nil
+        var proteinG: Double? = nil
+        var carbsG: Double? = nil
+        var fatG: Double? = nil
+        var saturatedFatG: Double? = nil
+        var sodiumMg: Double? = nil
+        var caffeineMg: Double? = nil
+        var alcoholG: Double? = nil
+        var citations: [SourceCitation] = []
+        /// Portion slider (0.1…4.0, default 1.0) — how much of the described
+        /// portion the user actually ate.
+        var portionMultiplier: Double = 1.0
+    }
+
+    /// Run the LLM estimate (exposes `isEstimating` for the UI spinner).
+    func runEstimate(request: NutritionPrompt.Request,
+                     photos: [Data]) async throws -> NutritionPrompt.Estimate {
         isEstimating = true
         defer { isEstimating = false }
-        let text = description?.isEmpty == false ? description! : ""
-        let request = NutritionPrompt.Request(
-            description: text.isEmpty ? "meal photo" : text,
-            serving: serving,
-            context: context,
-            mode: .photo,
-            photoCount: photos.count
-        )
-        let estimate = try await llm.estimate(request, photos: photos)
+        return try await llm.estimate(request, photos: photos)
+    }
+
+    /// Save a meal, for a NEW entry or an EDIT of `existing`. This is the
+    /// ONLY save path — saving always runs the analysis:
+    ///
+    ///  • The model endpoint (or its local keyword fallback when the endpoint
+    ///    is unreachable) produces a base estimate of the FULL described
+    ///    portion, scaled by `values.portionMultiplier` (0.1…4.0).
+    ///  • The user's hand-edited nutrient rows are respected verbatim — the
+    ///    user is in control.
+    ///  • A change to the description / serving / context / source re-runs the
+    ///    analysis immediately; the portion slider rescales the stored
+    ///    estimate without re-calling the model (instant).
+    ///  • A meal with no data at all (no nutrient values AND no photos)
+    ///    cannot be saved — it is returned unchanged and NOT persisted.
+    ///
+    /// Photos in `photos` replace the entry's stored photos (old files are
+    /// removed); for manual entries pass an empty array. The entry's date is
+    /// preserved on edit and is "now" for new entries.
+    @discardableResult
+    func saveEntry(existing: FoodEntry?,
+                   values: MealValues,
+                   photos: [Data] = []) async -> FoodEntry {
+        let id = existing?.id ?? UUID().uuidString
+        // The store is the source of truth for the CURRENT state (an `existing`
+        // copy may already carry a newer portion value, e.g. straight off the
+        // slider). All "what changed" comparisons use the stored entry.
+        let current: FoodEntry? = id == existing?.id
+            ? store.all().first { $0.id == id }
+            : nil
+        let date = current?.date ?? Date()
+
         var entry = FoodEntry(
+            id: id,
             dateEpochSeconds: date.timeIntervalSince1970,
-            description: estimate.description ?? text,
-            serving: serving,
-            context: context,
-            source: .photo,
-            isEstimated: true
+            description: values.description.isEmpty ? (existing?.description ?? "Meal") : values.description,
+            serving: values.serving,
+            context: values.context,
+            source: values.source,
+            photoFileNames: current?.photoFileNames ?? (existing?.photoFileNames ?? []),
+            portionMultiplier: values.portionMultiplier
         )
-        apply(estimate, to: &entry)
-        // Persist the photos and record their file names on the entry.
+        entry.citations = values.citations.isEmpty ? (current?.citations ?? existing?.citations) : values.citations
+
+        // ---- Analyze (always on save) ------------------------------------
+        let analysisChanged = current == nil
+            || current?.description != entry.description
+            || current?.serving != values.serving
+            || current?.context != values.context
+            || current?.source != values.source
+        let estimate: NutritionPrompt.Estimate
+        if analysisChanged {
+            let request = NutritionPrompt.Request(
+                description: entry.description,
+                serving: values.serving,
+                context: values.context,
+                mode: values.source == .photo ? .photo : .manual,
+                photoCount: values.source == .photo
+                    ? photos.count
+                    : (current?.photoFileNames.count ?? 0)
+            )
+            let photosToSend = values.source == .photo ? photos : []
+            // Model first; local keyword fallback when the endpoint is down.
+            // (isEstimating drives the Save-button spinner while in flight.)
+            isEstimating = true
+            do {
+                estimate = try await llm.estimate(request, photos: photosToSend)
+            } catch {
+                estimate = llm.fallbackEstimate(description: request.description,
+                                                serving: request.serving,
+                                                context: request.context)
+            }
+            isEstimating = false
+            // A fresh photo estimate may rename the meal (its own description).
+            if values.source == .photo, let d = estimate.description,
+               !d.isEmpty, values.description.isEmpty {
+                entry.description = d
+            }
+        } else {
+            // Same analysis inputs: recover the unscaled base from the STORED
+            // (already scaled) values, then rescale below if the portion
+            // changed.
+            let base: (Double?) -> Double? = { v in
+                v.map { $0 / ((current?.portionMultiplier) ?? 1.0) }
+            }
+            estimate = NutritionPrompt.Estimate(
+                caloriesKcal: base(current?.caloriesKcal),
+                proteinG: base(current?.proteinG),
+                carbsG: base(current?.carbsG),
+                fatG: base(current?.fatG),
+                saturatedFatG: base(current?.saturatedFatG),
+                sodiumMg: base(current?.sodiumMg),
+                caffeineMg: base(current?.caffeineMg),
+                alcoholG: base(current?.alcoholG),
+                description: nil,
+                citations: values.citations
+            )
+        }
+        apply(scaled(estimate, by: values.portionMultiplier), to: &entry)
+        entry.isEstimated = true
+
+        // ---- Honor the user's hand-edited rows ---------------------------
+        // Every row the user explicitly entered (non-nil) overrides the
+        // estimate; blank rows keep the (scaled) estimate.
+        if let v = values.caloriesKcal { entry.caloriesKcal = v }
+        if let v = values.proteinG { entry.proteinG = v }
+        if let v = values.carbsG { entry.carbsG = v }
+        if let v = values.fatG { entry.fatG = v }
+        if let v = values.saturatedFatG { entry.saturatedFatG = v }
+        if let v = values.sodiumMg { entry.sodiumMg = v }
+        if let v = values.caffeineMg { entry.caffeineMg = v }
+        if let v = values.alcoholG { entry.alcoholG = v }
+
+        // ---- Gate: no data at all -> not savable --------------------------
+        // (The sheet blocks the button too; this is the model-level
+        // guarantee. Nothing is persisted in that case.)
+        let hasNutrition = [entry.caloriesKcal, entry.proteinG, entry.carbsG,
+                            entry.fatG, entry.saturatedFatG, entry.sodiumMg,
+                            entry.caffeineMg, entry.alcoholG]
+            .contains { $0 != nil }
+        let hasPhotos = values.source == .photo && !photos.isEmpty
+        guard hasNutrition || hasPhotos else { return entry }
+
+        // ---- Photos --------------------------------------------------------
+        // Replace stored photos: drop the old files, write the new ones under
+        // the stable `{id}_{index}.jpg` names.
+        store.deletePhotos(for: id)
         var names: [String] = []
-        for (index, data) in photos.enumerated() {
-            names.append(store.savePhoto(data, for: entry.id, index: index))
+        if values.source == .photo {
+            for (i, data) in photos.enumerated() {
+                names.append(store.savePhoto(data, for: id, index: i))
+            }
         }
         entry.photoFileNames = names
-        store.add(entry)
+
+        // Editing the meal re-arms its insight: the curve is re-evaluated
+        // against the (possibly new) carb value once the window allows.
+        if current != nil && current?.insight != nil {
+            entry.insight = nil
+        }
+
+        if current != nil {
+            store.update(entry)
+        } else {
+            store.add(entry)
+        }
         refresh()
-        recomputeInsights(force: false)
+        recomputeInsights(force: true)
+        return entry
     }
 
-    /// Re-run the estimate for an existing entry using its current
-    /// description / context / photos, and update it (isEstimated=true).
-    func reanalyze(_ entry: FoodEntry) async throws {
-        isEstimating = true
-        defer { isEstimating = false }
-        let photos = store.photoData(for: entry)
-        let request = NutritionPrompt.Request(
+    /// Update an existing entry (detail view: portion slider or edited rows).
+    /// Reuses `saveEntry` so analysis + insight re-arm are identical to the
+    /// sheet's save path.
+    @discardableResult
+    func updateEntry(_ updated: FoodEntry) async -> FoodEntry {
+        let photos = store.photoData(for: updated)
+        return await saveEntry(existing: updated,
+                               values: values(from: updated),
+                               photos: photos)
+    }
+
+    /// The `MealValues` equivalent of an entry (for `updateEntry`).
+    func values(from entry: FoodEntry) -> MealValues {
+        MealValues(
             description: entry.description,
             serving: entry.serving,
             context: entry.context,
-            mode: entry.source == .photo ? .photo : .manual,
-            photoCount: entry.photoFileNames.count
+            source: entry.source,
+            caloriesKcal: entry.caloriesKcal,
+            proteinG: entry.proteinG,
+            carbsG: entry.carbsG,
+            fatG: entry.fatG,
+            saturatedFatG: entry.saturatedFatG,
+            sodiumMg: entry.sodiumMg,
+            caffeineMg: entry.caffeineMg,
+            alcoholG: entry.alcoholG,
+            citations: entry.citations ?? [],
+            portionMultiplier: entry.portionMultiplier
         )
-        let estimate = entry.source == .photo
-            ? try await llm.estimate(request, photos: photos)
-            : try await llm.estimate(request)
-        var updated = entry
-        apply(estimate, to: &updated)
-        // A fresh photo estimate may rename the meal (its own description).
-        if entry.source == .photo, let desc = estimate.description, !desc.isEmpty {
-            updated.description = desc
-        }
-        updated.isEstimated = true
-        store.update(updated)
-        refresh()
-        recomputeInsights(force: false)
     }
 
-    /// Save a manual edit (flips isEstimated=false — the values are now the
-    /// user's, not the model's).
-    func edit(_ entry: FoodEntry) {
-        var updated = entry
-        updated.isEstimated = false
-        store.update(updated)
-        refresh()
-        recomputeInsights(force: false)
+    /// Scale every non-nil estimate value by `multiplier` (portion adjust).
+    private func scaled(_ e: NutritionPrompt.Estimate, by multiplier: Double) -> NutritionPrompt.Estimate {
+        let s: (Double?) -> Double? = { v in v.map { ($0 * multiplier).rounded() } }
+        return NutritionPrompt.Estimate(
+            caloriesKcal: s(e.caloriesKcal),
+            proteinG: s(e.proteinG),
+            carbsG: s(e.carbsG),
+            fatG: s(e.fatG),
+            saturatedFatG: s(e.saturatedFatG),
+            sodiumMg: s(e.sodiumMg),
+            caffeineMg: s(e.caffeineMg),
+            alcoholG: s(e.alcoholG),
+            description: e.description,
+            citations: e.citations
+        )
     }
+
+    // MARK: Remove
 
     /// Remove an entry and its photos.
     func delete(_ entry: FoodEntry) {
@@ -354,91 +534,6 @@ final class FoodLogModel: ObservableObject {
             healthKit: glucoseModel?.healthKit,
             entries: entries
         )
-    }
-
-    // MARK: Sheet-facing save/estimate
-
-    /// The structured values the sheet collects from its editable rows.
-    struct MealValues {
-        var description: String = ""
-        var serving: String? = nil
-        var context: String? = nil
-        var source: FoodEntry.Source = .manual
-        var caloriesKcal: Double? = nil
-        var proteinG: Double? = nil
-        var carbsG: Double? = nil
-        var fatG: Double? = nil
-        var saturatedFatG: Double? = nil
-        var sodiumMg: Double? = nil
-        var caffeineMg: Double? = nil
-        var alcoholG: Double? = nil
-        var citations: [SourceCitation] = []
-    }
-
-    /// Run the LLM estimate the sheet's "Estimate"/"Reanalyze" buttons use
-    /// (exposes `isEstimating` for the UI spinner).
-    func runEstimate(request: NutritionPrompt.Request,
-                     photos: [Data]) async throws -> NutritionPrompt.Estimate {
-        isEstimating = true
-        defer { isEstimating = false }
-        return try await llm.estimate(request, photos: photos)
-    }
-
-    /// Save a meal from the sheet, for a NEW entry or an EDIT of `existing`.
-    /// Photos in `photos` replace the entry's stored photos (old files are
-    /// removed); for manual entries pass an empty array. The entry's date is
-    /// preserved on edit and is "now" for new entries.
-    @discardableResult
-    func saveEntry(existing: FoodEntry?,
-                   values: MealValues,
-                   isEstimated: Bool,
-                   photos: [Data] = []) -> FoodEntry {
-        let date = existing?.date ?? Date()
-        let id = existing?.id ?? UUID().uuidString
-        var entry = FoodEntry(
-            id: id,
-            dateEpochSeconds: date.timeIntervalSince1970,
-            description: values.description.isEmpty ? (existing?.description ?? "Meal") : values.description,
-            serving: values.serving,
-            context: values.context,
-            source: values.source,
-            isEstimated: isEstimated
-        )
-        entry.caloriesKcal = values.caloriesKcal
-        entry.proteinG = values.proteinG
-        entry.carbsG = values.carbsG
-        entry.fatG = values.fatG
-        entry.saturatedFatG = values.saturatedFatG
-        entry.sodiumMg = values.sodiumMg
-        entry.caffeineMg = values.caffeineMg
-        entry.alcoholG = values.alcoholG
-        entry.citations = values.citations.isEmpty ? existing?.citations : values.citations
-        // Editing a stored value clears any earlier insight — the curve is
-        // re-evaluated against the (possibly new) carb value.
-        if existing != nil && existing?.insight != nil {
-            entry.insight = nil
-            // Re-arm: if the window already elapsed, the next recompute lands
-            // a fresh insight from the new carbs.
-        }
-
-        // Replace stored photos: drop the old files, write the new ones under
-        // the stable `{id}_{index}.jpg` names.
-        store.deletePhotos(for: id)
-        var names: [String] = []
-        if values.source == .photo {
-            for (i, data) in photos.enumerated() {
-                names.append(store.savePhoto(data, for: id, index: i))
-            }
-        }
-        entry.photoFileNames = names
-        if existing != nil {
-            store.update(entry)
-        } else {
-            store.add(entry)
-        }
-        refresh()
-        recomputeInsights(force: true)
-        return entry
     }
 
     // MARK: Helpers

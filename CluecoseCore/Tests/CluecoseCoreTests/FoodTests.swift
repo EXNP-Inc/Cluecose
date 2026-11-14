@@ -300,6 +300,7 @@ final class FoodEntryCodableTests: XCTestCase {
             context: "extra cheese, no salsa",
             source: .photo,
             photoFileNames: ["a.jpg", "b.jpg"],
+            portionMultiplier: 1.5,
             caloriesKcal: 650, proteinG: 35, carbsG: 50, fatG: 30,
             sodiumMg: 1100, caffeineMg: nil, alcoholG: nil, saturatedFatG: 12,
             citations: [SourceCitation(title: "Burrito ref", url: "https://ref.example/burrito")],
@@ -313,6 +314,7 @@ final class FoodEntryCodableTests: XCTestCase {
         XCTAssertEqual(back.context, "extra cheese, no salsa")
         XCTAssertEqual(back.source, .photo)
         XCTAssertEqual(back.photoFileNames, ["a.jpg", "b.jpg"])
+        XCTAssertEqual(back.portionMultiplier, 1.5)
         XCTAssertEqual(back.caloriesKcal, 650)
         XCTAssertEqual(back.proteinG, 35)
         XCTAssertEqual(back.carbsG, 50)
@@ -324,6 +326,25 @@ final class FoodEntryCodableTests: XCTestCase {
         XCTAssertEqual(back.citations?.count, 1)
         XCTAssertEqual(back.citations?.first?.url, "https://ref.example/burrito")
         XCTAssertTrue(back.isEstimated)
+
+        // The key is always encoded (even for the 1.0 default) so the schema
+        // is stable on both platforms.
+        let obj = try JSONSerialization.jsonObject(
+            with: data) as! [String: Any]
+        XCTAssertEqual((obj["portionMultiplier"] as? NSNumber)?.doubleValue, 1.5)
+    }
+
+    func testPortionMultiplierDefaultsToOneWhenAbsent() throws {
+        // A record written before the multiplier existed must decode with a
+        // full portion (1.0), and re-encoding must now carry the key.
+        let legacy = """
+        {"id":"y","dateEpochSeconds":123,"description":"legacy meal","source":"manual","caloriesKcal":300}
+        """
+        let e = try JSONDecoder().decode(FoodEntry.self, from: legacy.data(using: .utf8)!)
+        XCTAssertEqual(e.portionMultiplier, 1.0)
+        let re = try JSONEncoder().encode(e)
+        let obj = try JSONSerialization.jsonObject(with: re) as! [String: Any]
+        XCTAssertEqual((obj["portionMultiplier"] as? NSNumber)?.doubleValue, 1.0)
     }
 
     func testDecodeToleratesMissingNewFields() throws {

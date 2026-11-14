@@ -76,6 +76,13 @@ public struct FoodEntry: Identifiable, Codable, Equatable, Sendable {
     /// File names (not paths) of the stored photos, when source == .photo.
     /// Up to 5; the first is the primary image.
     public var photoFileNames: [String]
+    /// Portion multiplier the user adjusted for this meal (0.1…4.0, default
+    /// 1.0): the estimate describes the full photographed/typed portion, and
+    /// the user may have eaten a fraction or a multiple of it. The STORED
+    /// nutrition values are the estimate × this factor; the UI shows the
+    /// slider so the user can see and re-scale the amount eaten. Lenient on
+    /// decode: missing/absent → 1.0 (older records are a single full portion).
+    public var portionMultiplier: Double
     // Nutrition — all optional; null = unknown / not applicable.
     public var caloriesKcal: Double?
     public var proteinG: Double?
@@ -105,6 +112,7 @@ public struct FoodEntry: Identifiable, Codable, Equatable, Sendable {
                 context: String? = nil,
                 source: Source = .manual,
                 photoFileNames: [String] = [],
+                portionMultiplier: Double = 1.0,
                 caloriesKcal: Double? = nil,
                 proteinG: Double? = nil,
                 carbsG: Double? = nil,
@@ -123,6 +131,7 @@ public struct FoodEntry: Identifiable, Codable, Equatable, Sendable {
         self.context = context
         self.source = source
         self.photoFileNames = photoFileNames
+        self.portionMultiplier = portionMultiplier
         self.caloriesKcal = caloriesKcal
         self.proteinG = proteinG
         self.carbsG = carbsG
@@ -140,6 +149,7 @@ public struct FoodEntry: Identifiable, Codable, Equatable, Sendable {
     // exact key names on encode so the Android mirror round-trips the same JSON.
     private enum CodingKeys: String, CodingKey {
         case id, dateEpochSeconds, description, serving, context, source, photoFileNames
+        case portionMultiplier
         case caloriesKcal, proteinG, carbsG, fatG, sodiumMg, caffeineMg
         case alcoholG, saturatedFatG, citations, isEstimated, insight
     }
@@ -161,6 +171,8 @@ public struct FoodEntry: Identifiable, Codable, Equatable, Sendable {
         } else {
             photoFileNames = []
         }
+        // Lenient: missing → 1.0 (a single full portion, pre-multipplier).
+        portionMultiplier = try c.decodeIfPresent(Double.self, forKey: .portionMultiplier) ?? 1.0
         caloriesKcal = try c.decodeIfPresent(Double.self, forKey: .caloriesKcal)
         proteinG = try c.decodeIfPresent(Double.self, forKey: .proteinG)
         carbsG = try c.decodeIfPresent(Double.self, forKey: .carbsG)
@@ -184,6 +196,8 @@ public struct FoodEntry: Identifiable, Codable, Equatable, Sendable {
         try c.encode(source, forKey: .source)
         // Always encode the array (possibly empty) so the schema is stable.
         try c.encode(photoFileNames, forKey: .photoFileNames)
+        // Always encode (even 1.0) so the schema is stable on both platforms.
+        try c.encode(portionMultiplier, forKey: .portionMultiplier)
         try c.encodeIfPresent(caloriesKcal, forKey: .caloriesKcal)
         try c.encodeIfPresent(proteinG, forKey: .proteinG)
         try c.encodeIfPresent(carbsG, forKey: .carbsG)

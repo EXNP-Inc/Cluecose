@@ -9,6 +9,9 @@ struct ContentView: View {
     /// meal"; a value means "edit this entry".
     @State private var showFoodSheet = false
     @State private var foodSheetEntry: FoodEntry?
+    /// The per-meal detail + analytics view (opened from the entry's
+    /// top-right arrow or its insight callout).
+    @State private var detailEntry: FoodEntry?
     @FocusState private var accountIDFocused: Bool
 
     var body: some View {
@@ -38,6 +41,9 @@ struct ContentView: View {
                                     onEdit: { entry in
                                         foodSheetEntry = entry
                                         showFoodSheet = true
+                                    },
+                                    onDetail: { entry in
+                                        detailEntry = entry
                                     })
                         PatternsCard(model: model.foodLog)
                     } else if model.hasPairedSensor {
@@ -70,6 +76,11 @@ struct ContentView: View {
             FoodLogSheet(model: model.foodLog,
                          existing: foodSheetEntry)
                 .environmentObject(model)
+        }
+        .sheet(item: $detailEntry) { entry in
+            FoodDetailView(model: model.foodLog,
+                           glucose: model,
+                           entry: entry)
         }
     }
 

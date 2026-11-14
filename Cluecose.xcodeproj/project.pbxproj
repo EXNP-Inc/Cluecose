@@ -35,6 +35,7 @@
 		A61BC9CF26D600FEC0D7AECD /* WatchGlucoseModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C98BD33AFCED1A8D5079474 /* WatchGlucoseModel.swift */; };
 		A88C69ADBE969E442E84E6FC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 92150EF193F85B429ED12470 /* Assets.xcassets */; };
 		C06FA87607C77DE090154A5B /* FoodLogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22B8E1ABDC4151674AE2C80C /* FoodLogStore.swift */; };
+		CA5A0C5C04248121D4F3C82B /* FoodDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798CB8D1A79C6BA277655E61 /* FoodDetailView.swift */; };
 		CFED26E84B07EF19109724A6 /* FoodLogSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99AF97CD9782C76CCBE4021F /* FoodLogSheet.swift */; };
 		DD0E271DC52C4C11EC5C835B /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3BF1239158269AED92F6EAC /* ContentView.swift */; };
 		DDE2897FA15BF4787CDB8886 /* GlucoseModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14A8FC2FF578D2EE2298384A /* GlucoseModel.swift */; };
@@ -96,6 +97,7 @@
 		4C41B6BDABE93AAE27D8B1F7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		5007C4CBB944FEADA9D5FDEE /* CluecoseWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CluecoseWatchApp.swift; sourceTree = "<group>"; };
 		6162FACBECE72ECFC54C1421 /* CluecoseLiveActivityApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CluecoseLiveActivityApp.swift; sourceTree = "<group>"; };
+		798CB8D1A79C6BA277655E61 /* FoodDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodDetailView.swift; sourceTree = "<group>"; };
 		80024285B51C2C1F2BA4C1A3 /* FoodLLMClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodLLMClient.swift; sourceTree = "<group>"; };
 		81DA60BF7D969B7E8882BED6 /* WatchPusher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchPusher.swift; sourceTree = "<group>"; };
 		8973082620FA33E3B3120555 /* FoodLogModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodLogModel.swift; sourceTree = "<group>"; };
@@ -217,6 +219,7 @@
 		B5A4323436853D7399015D4C /* Food */ = {
 			isa = PBXGroup;
 			children = (
+				798CB8D1A79C6BA277655E61 /* FoodDetailView.swift */,
 				80024285B51C2C1F2BA4C1A3 /* FoodLLMClient.swift */,
 				92B6618B090B30750C4DF50A /* FoodLogCard.swift */,
 				8973082620FA33E3B3120555 /* FoodLogModel.swift */,
@@ -470,6 +473,7 @@
 				E4E44AC11696D65B1A419DDB /* CluecoseGlucoseAttributes.swift in Sources */,
 				7588027009566DF4DD046CEC /* CluecoseTheme.swift in Sources */,
 				DD0E271DC52C4C11EC5C835B /* ContentView.swift in Sources */,
+				CA5A0C5C04248121D4F3C82B /* FoodDetailView.swift in Sources */,
 				5FEAAA428D7C44FB5361664D /* FoodLLMClient.swift in Sources */,
 				34A05AE39F91F18C12DBB2ED /* FoodLogCard.swift in Sources */,
 				7A6A63B99A42DB485C12D262 /* FoodLogModel.swift in Sources */,

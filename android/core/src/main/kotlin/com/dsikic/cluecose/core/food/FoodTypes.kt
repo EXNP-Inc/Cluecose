@@ -138,6 +138,14 @@ data class FoodEntry(
     /** File names (not paths) of the stored photos, when source == photo;
      *  up to 5; the first is the primary image. */
     val photoFileNames: List<String> = emptyList(),
+    /** Portion multiplier the user adjusted for this meal (0.1..4.0, default
+     *  1.0): the estimate describes the full photographed/typed portion, and
+     *  the user may have eaten a fraction or a multiple of it. The stored
+     *  nutrition values are the estimate x this factor; the UI shows the
+     *  slider so the user can see and re-scale the amount eaten. Lenient on
+     *  decode: missing/absent -> 1.0 (older records are a single full portion).
+     *  (Swift `portionMultiplier`.) */
+    val portionMultiplier: Double = 1.0,
     // Nutrition — all optional; null = unknown / not applicable.
     val caloriesKcal: Double? = null,
     val proteinG: Double? = null,
@@ -173,6 +181,7 @@ object FoodEntrySerializer : KSerializer<FoodEntry> {
         element("context", String.serializer().descriptor)
         element("source", String.serializer().descriptor)
         element("photoFileNames", ListSerializer(String.serializer()).descriptor)
+        element("portionMultiplier", Double.serializer().descriptor)
         element("caloriesKcal", Double.serializer().descriptor)
         element("proteinG", Double.serializer().descriptor)
         element("carbsG", Double.serializer().descriptor)
@@ -203,6 +212,9 @@ object FoodEntrySerializer : KSerializer<FoodEntry> {
         // Always encode the array (possibly empty) so the schema is stable
         // (Swift: `try c.encode(photoFileNames, ...)`).
         o["photoFileNames"] = JsonArray(value.photoFileNames.map { JsonPrimitive(it) })
+        // Always encode (even 1.0) so the schema is stable on both platforms
+        // (Swift: `try c.encode(portionMultiplier, ...)`).
+        o["portionMultiplier"] = JsonPrimitive(value.portionMultiplier)
         value.caloriesKcal?.let { o["caloriesKcal"] = JsonPrimitive(it) }
         value.proteinG?.let { o["proteinG"] = JsonPrimitive(it) }
         value.carbsG?.let { o["carbsG"] = JsonPrimitive(it) }
@@ -270,6 +282,9 @@ object FoodEntrySerializer : KSerializer<FoodEntry> {
                     (item as? JsonPrimitive)?.takeIf { it.isString }?.content
                 } ?: emptyList()
             } ?: emptyList(),
+            // Lenient: missing/absent/null -> 1.0 (a single full portion,
+            // pre-multiplier records). (Swift decodeIfPresent ?? 1.0.)
+            portionMultiplier = numOrNull("portionMultiplier") ?: 1.0,
             caloriesKcal = numOrNull("caloriesKcal"),
             proteinG = numOrNull("proteinG"),
             carbsG = numOrNull("carbsG"),

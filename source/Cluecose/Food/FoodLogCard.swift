@@ -5,12 +5,15 @@
 //  The home-screen food card: the day's totals (kcal, protein, carbs, fat,
 //  sodium, caffeine in the main line; alcohol + saturated fat as a secondary
 //  line), the day's entries (description, a small nutrient line, a photo
-//  thumb when there is one, and the per-meal insight in a colored callout
-//  when present — spike = orange, reactive low = blue, nothing when nil),
+//  thumb when there is one, the per-meal insight in a colored callout when
+//  present — spike = orange, reactive low = blue — and, while the post-meal
+//  window is still forming, a small "analyzing" pill with the result ETA),
 //  and the "Add meal" button.
 //
-//  A tap on an entry opens the add/edit sheet in edit mode; a tap on the
-//  sheet's delete removes it. Styled with the shared glass theme.
+//  A tap on an entry opens the add/edit sheet in edit mode. The
+//  "Details ›" arrow at the top-right of each entry (and the insight
+//  callout itself) opens the per-meal detail + analytics view. Styled with
+//  the shared glass theme.
 //
 
 import SwiftUI
@@ -22,6 +25,8 @@ struct FoodLogCard: View {
     var onAdd: () -> Void
     /// Opens the add/edit sheet for an existing entry — set by the parent.
     var onEdit: (FoodEntry) -> Void
+    /// Opens the per-meal detail + analytics view — set by the parent.
+    var onDetail: (FoodEntry) -> Void
 
     /// In-app meal search box: filters the day's entries by description,
     /// serving or context. Small and dependency-free (no Spotlight / CSSearchableItem
@@ -192,17 +197,67 @@ struct FoodLogCard: View {
                     }
                     nutrientLine(entry)
                 }
-                Spacer(minLength: 0)
-                Text(entry.date, format: .dateTime.hour().minute())
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.4))
+                Spacer(minLength: 4)
+                VStack(alignment: .trailing, spacing: 3) {
+                    // The details arrow — top-right of the card entry.
+                    Button {
+                        onDetail(entry)
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white.opacity(0.45))
+                            .frame(width: 22, height: 22)
+                            .background(.white.opacity(0.08), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    Text(entry.date, format: .dateTime.hour().minute())
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.4))
+                }
             }
             if let insight = entry.insight {
-                insightCallout(insight)
+                // The insight callout is itself tappable → detail view.
+                Button {
+                    onDetail(entry)
+                } label: {
+                    insightCallout(insight)
+                }
+                .buttonStyle(.plain)
+            } else if case .pending = model.analytics(for: entry) {
+                pendingPill(entry)
             }
         }
         .contentShape(Rectangle())
         .onTapGesture { onEdit(entry) }
+    }
+
+    /// The small "analyzing" pill shown while the post-meal window is still
+    /// forming: what's happening + when the result lands. Tappable → detail.
+    private func pendingPill(_ entry: FoodEntry) -> some View {
+        let a = model.analytics(for: entry)
+        var label = "Analyzing your blood-sugar response…"
+        if case .pending(let readyAt, let remainingMin) = a {
+            let when = readyAt.formatted(.dateTime.hour().minute())
+            label = "Blood-sugar analysis in ~\(remainingMin) min (done \(when))"
+        }
+        return Button {
+            onDetail(entry)
+        } label: {
+            HStack(alignment: .top, spacing: 7) {
+                Image(systemName: "hourglass")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(Color(red: 0.45, green: 0.78, blue: 1.0))
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.75))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(red: 0.45, green: 0.78, blue: 1.0).opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(red: 0.45, green: 0.78, blue: 1.0).opacity(0.3), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
