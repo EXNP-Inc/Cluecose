@@ -467,15 +467,22 @@ class RealGlucoseRepository(
 
             val handshakeResult = runCatching {
                 if (useCached) {
-                    val cached = runCatching { runCachedReconnect(session, blePIN, s.phase5RawKey) }
-                    if (cached.isSuccess) {
-                        val (c, prefix) = cached.getOrThrow()
-                        Triple(c, prefix, s)
-                    } else {
-                        Log.w(TAG, "cached reconnect failed (${cached.exceptionOrNull()?.message}) — full first-pair fallback")
-                        val (c, material, prefix) = runFirstPairHandshake(session, blePIN)
-                        Triple(c, prefix, s.copy(phase5RawKey = material.rawKey))
-                    }
+                    // CACHED ONLY — no full 03 03 fallback from the reconnect
+                    // path (pair21 07:15:52 proved it: the cached attempt
+                    // ends in a sensor link drop, the fallback then writes
+                    // StartAuthentication onto the DEAD session — status 21
+                    // after a 3 s framework queue). Worse, a full 03 03
+                    // against an already-paired sensor sends a NEW phone
+                    // ephemeral: the sensor accepts the preamble but never
+                    // streams its eph and drops at ~60 s (pair20 05:34–05:41,
+                    // 6/6 lost) — and that fresh-eph attempt is what
+                    // invalidates the sensor's cached session, making the
+                    // next 0x11 Phase 5 rejected too (pair21 07:02:52,
+                    // 07:15:52: fast reason-19 drop ~400 ms after Phase 5).
+                    // If the cached session is gone, only a fresh NFC tap
+                    // (nfcPairConnect, allowCached=false) re-pairs.
+                    val (c, prefix) = runCachedReconnect(session, blePIN, s.phase5RawKey)
+                    Triple(c, prefix, s)
                 } else {
                     val (c, material, prefix) = runFirstPairHandshake(session, blePIN)
                     Triple(c, prefix, s.copy(phase5RawKey = material.rawKey))
