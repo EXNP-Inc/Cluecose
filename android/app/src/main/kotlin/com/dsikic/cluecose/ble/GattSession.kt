@@ -130,6 +130,14 @@ class GattSession(
      * same characteristic drains it, in order. Bounded per characteristic;
      * overflow drops the oldest. Only the GATT executor thread touches this
      * ([handleNotify] and the [awaitNotify] drain both run on it).
+     *
+     * Note: retransmitted cert TAIL frames (the sensor re-sends cert frames
+     * after the 140 B waiter completes — 21:32:54 field run: tail frames
+     * 4/6/6/7 one through 147 ms post-completion) are NOT buffered; they
+     * are dropped at the [handleNotify] source by
+     * [Companion.isRetainedCertRetransmit], so they can never be drained
+     * into the next waiter on this characteristic (the 65 B sensor
+     * ephemeral) and poison it.
      */
     private val securityBuffer = mutableMapOf<String, ArrayDeque<ByteArray>>()
 
@@ -448,6 +456,26 @@ class GattSession(
                 waiter.latch.countDown()
                 return
             }
+            // The 65 B sensor-ephemeral waiter lives on the SAME cert
+            // characteristic. The sensor retransmits cert frames after the
+            // cert completes (21:32:54 field run: tail frames 4/6/6/7 one
+            // through 147 ms post-completion) — if one of those reaches a
+            // non-cert waiter, same-seq different-content makes
+            // feedFragment keep the FIRST occurrence, i.e. the stale cert
+            // chunk poisons the ephemeral exchange (wrong ECDH pubkey).
+            // Retained-cert frames are byte-identical by construction
+            // (static per-patch blob), so a content match is a definitive
+            // retransmit and is dropped, not fed.
+            if (waiter.exactly != CERT_CARRYOVER_SIZE &&
+                targetId == certChar?.uuid?.toString() &&
+                Companion.isRetainedCertRetransmit(deviceAddress?.uppercase(), value)
+            ) {
+                Log.w(
+                    TAG,
+                    "security notify dropped (seq=${value[0].toInt() and 0xFF}) — retained-cert retransmit into a ${waiter.exactly} B waiter on the cert char",
+                )
+                return
+            }
             feedFragment(targetId, value, waiter)
             return
         }
@@ -468,6 +496,19 @@ class GattSession(
         val isSecurity = targetId == certChar?.uuid?.toString() ||
             targetId == challengeChar?.uuid?.toString()
         if (isSecurity) {
+            // Retransmitted cert tail (byte-identical to the retained cert,
+            // 21:32:54 run) must not buffer: the next waiter on this
+            // characteristic is the 65 B sensor ephemeral, and a same-seq
+            // stale chunk would poison it.
+            if (targetId == certChar?.uuid?.toString() &&
+                Companion.isRetainedCertRetransmit(deviceAddress?.uppercase(), value)
+            ) {
+                Log.w(
+                    TAG,
+                    "security notify dropped (seq=${value[0].toInt() and 0xFF}) — retained-cert retransmit, not buffered",
+                )
+                return
+            }
             val deque = securityBuffer.getOrPut(targetId) { ArrayDeque() }
             if (deque.size >= SECURITY_BUFFER_MAX) deque.removeFirst()
             deque.addLast(value)
@@ -637,19 +678,42 @@ class GattSession(
         if (pendingWaiter === waiter) pendingWaiter = null
 
         // Cert carryover bookkeeping (executor-owned state read after the
-        // latch edge): on success the cert is complete — drop the partial
-        // map (it is now dead weight for this MAC). On timeout, persist
-        // whatever this stream collected so the NEXT attempt (fresh
-        // GattSession, same MAC) starts ahead instead of from zero.
+        // latch edge). On timeout, persist whatever this stream collected so
+        // the NEXT attempt (fresh GattSession, same MAC) starts ahead
+        // instead of from zero. On SUCCESS, KEEP the completed cert in the
+        // carryover: the cert is a static per-patch blob, and a later failed
+        // stage (ephemeral, challenge, Phase 5/6) forces the WHOLE preamble
+        // to re-run — with the full cert seeded, the cert wait completes
+        // from the seed alone (0 frames needed in flight) and the attempt
+        // can spend its radio budget on the stage that actually failed.
+        // (21:32 field run: attempt 2 completed the cert from a 5-chunk
+        // seed, then its cert completion wiped the seed; attempts 3-6 all
+        // lost the re-streamed cert in flight again — union stalled at
+        // {1,2,3,4,5,6,7}, seq 0 lost 5/5.) The completed cert is
+        // re-verified on every preamble (verifySensorCertificate), so a
+        // stale/wrong blob cannot silently pass: it fails fast on the
+        // verification, not mid-burst. The blob is dropped on
+        // forgetSensor/clearCertCarryover and on a new pairing attempt.
         if (on == BleCharRef.CERT_HANDSHAKE && exactly == CERT_CARRYOVER_SIZE && carryKey != null) {
-            if (waiter.done) {
-                certCarryover.remove(carryKey)
-            } else {
+            if (!waiter.done) {
                 val bucket = certCarryover.getOrPut(carryKey) { java.util.concurrent.ConcurrentHashMap() }
                 for ((seq, chunk) in waiter.receivedChunks) {
                     bucket.putIfAbsent(seq, chunk)
                 }
                 Log.i(TAG, "cert carryover saved: ${bucket.size} chunks (seqs ${bucket.keys.sorted()}) for $carryKey")
+            } else {
+                val bucket = certCarryover.getOrPut(carryKey) { java.util.concurrent.ConcurrentHashMap() }
+                var added = 0
+                for ((seq, chunk) in waiter.receivedChunks) {
+                    if (!bucket.containsKey(seq)) {
+                        bucket[seq] = chunk
+                        added++
+                    }
+                }
+                Log.i(
+                    TAG,
+                    "cert carryover RETAINED complete cert: ${bucket.size} chunks (seqs ${bucket.keys.sorted()}, $added new) for $carryKey",
+                )
             }
         }
 
@@ -982,9 +1046,31 @@ class GattSession(
         // per-patch blob, so the union of attempts completes it within
         // 1-2 tries. Lives in the companion because each attempt builds a
         // FRESH GattSession (RealGlucoseRepository.connectAndAuthorize
-        // loop). Cleared on cert success, on a new NFC pairing (repo), and
-        // on forget.
+        // loop). Once COMPLETE the cert is RETAINED (a later-stage failure
+        // re-runs the whole preamble and the seed completes the cert wait
+        // with zero frames in flight); cleared only by clearCertCarryover
+        // (forgetSensor / new pairing).
         private val certCarryover = java.util.concurrent.ConcurrentHashMap<String, MutableMap<Int, ByteArray>>()
+
+        /**
+         * True when [value] is byte-identical to a retained sensor-cert
+         * chunk for [carryKey] (retransmit detection). The sensor
+         * retransmits cert frames after the cert stream completes (21:32:54
+         * run: tail frames 1–147 ms post-completion); on the cert
+         * characteristic the 65 B sensor-ephemeral waiter comes next, and a
+         * retransmit landing on a same seq would make [feedFragment] keep
+         * the STALE cert chunk (first-occurrence-wins) and poison the ECDH
+         * pubkey. Retained cert is a static per-patch blob, so a content
+         * match is a definitive retransmit — drop, never feed.
+         */
+        fun isRetainedCertRetransmit(carryKey: String?, value: ByteArray): Boolean {
+            if (carryKey == null || value.size < 2) return false
+            val bucket = certCarryover[carryKey] ?: return false
+            val seq = value[0].toInt() and 0xFF
+            val chunk = value.copyOfRange(1, value.size)
+            val prior = bucket[seq] ?: return false
+            return prior.contentEquals(chunk)
+        }
 
         /**
          * Drop any stored partial-cert chunks for a (possibly null) MAC.
