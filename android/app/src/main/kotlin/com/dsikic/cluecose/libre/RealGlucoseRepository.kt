@@ -411,11 +411,16 @@ class RealGlucoseRepository(
         // target advertises, but a connect can still miss the window (GATT
         // 133); rescan + retry a few times before giving up. A HANDSHAKE
         // failure also retries the whole cycle, not just the connect: the
-        // 65 B cert stream can drop its first frame on a freshly armed link
-        // (observed 16:36: frames 1..6 contiguous, frame 0 lost), and
-        // re-sending GetCertificate on a fresh link re-arms the stream from
-        // frame 0.
-        val maxAttempts = 3
+        // 140 B cert stream is a ~90 ms burst that loses 2-3 frames in
+        // flight per fresh link (different frames each attempt). The
+        // cross-attempt cert carryover (GattSession.certCarryover) unions
+        // the chunks across these attempts, and re-sending GetCertificate on
+        // a fresh link re-arms the stream from frame 0. 6 attempts: with
+        // per-frame loss ~1/3 and independent per attempt, the probability
+        // any one of the 8 frames is lost in ALL six is ~(1/3)^6 per frame
+        // — the union covers all 8 with high probability (field: 3 attempts
+        // at interval 36 already unioned to {0,1,2,3,4,5,6,7}).
+        val maxAttempts = 6
         var gatt: GattSession? = null
         var lastError: Throwable? = null
         var crypto: DataPlaneCrypto? = null

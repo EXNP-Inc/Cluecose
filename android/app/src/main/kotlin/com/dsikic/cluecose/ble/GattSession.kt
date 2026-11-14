@@ -315,18 +315,14 @@ class GattSession(
         } else {
             Log.w(TAG, "MTU exchange did not settle in 2 s — continuing")
         }
-        // The default connection interval on this link is 36 (46.8 ms), and
-        // the sensor streams the 140 B cert as a ~90 ms burst — only 2-3
-        // connection events carry it, so 2-3 frames are lost in flight per
-        // attempt (field runs: different frames lost each try). Ask for a
-        // HIGH connection priority: a fast interval (7.5-15 ms) gives the
-        // burst 6-12 connection events, enough to carry all 8 frames. The
-        // request is non-binding — if the sensor refuses, the cert
-        // carryover (cross-attempt chunk union) still completes the stream.
-        // (The framework's connection-accept result is not exposed
-        // publicly, so the boolean only says "queued".)
-        val prioQueued = g.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
-        Log.i(TAG, "requestConnectionPriority(HIGH) queued=$prioQueued")
+        // NOTE: do NOT requestConnectionPriority(HIGH) here. Measured 21:07/
+        // 21:09 runs: the fast interval (12 = 15 ms) systematically dropped
+        // cert seq 3 (0/3 attempts) even though the default interval (36 =
+        // 46.8 ms) carried it (3/3 attempts) — the sensor's retransmit
+        // pattern interleaves badly with a fast poll on this link. The cert
+        // burst loss is handled by the cross-attempt cert carryover
+        // (certCarryover union across the connectAndAuthorize retries), not
+        // by a faster interval.
         try {
             Thread.sleep(LINK_SETTLE_MS)
         } catch (e: InterruptedException) {
