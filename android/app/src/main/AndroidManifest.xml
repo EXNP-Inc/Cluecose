@@ -31,6 +31,8 @@
     <application
         android:name=".CluecoseApp"
         android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="Cluecose"
         android:supportsRtl="true"
         android:theme="@style/Theme.Cluecose">

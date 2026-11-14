@@ -67,8 +67,7 @@ final class WatchGlucoseModel: ObservableObject {
         if let saved, let u = GlucoseUnit(rawValue: saved) {
             unit = u
         } else {
-            let region = Locale.current.region?.identifier ?? ""
-            unit = region == "US" ? .mgdl : .mmol
+            unit = .mmol
         }
 
         // Live push channel (primary).

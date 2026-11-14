@@ -89,6 +89,7 @@ fun MainScreen(
             style = MaterialTheme.typography.labelSmall,
             color = CluecoseColors.white(0.35f),
             textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
         )
     }
 }

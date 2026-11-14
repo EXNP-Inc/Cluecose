@@ -570,6 +570,7 @@ struct ContentView: View {
             .font(.caption2)
             .foregroundStyle(.white.opacity(0.35))
             .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
     }
 }
 

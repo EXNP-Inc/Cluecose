@@ -159,8 +159,7 @@ final class GlucoseModel: ObservableObject {
         if let saved, let u = GlucoseUnit(rawValue: saved) {
             unit = u
         } else {
-            let region = Locale.current.region?.identifier ?? ""
-            unit = region == "US" ? .mgdl : .mmol
+            unit = .mmol
         }
         libreViewAccountID = UserDefaults.standard.string(forKey: Self.accountIDKey) ?? ""
         healthKitEnabled = UserDefaults.standard.object(forKey: HealthKitSync.enabledKey) as? Bool ?? true

@@ -106,7 +106,7 @@ enum class ConnectionState {
 data class UiState(
     val connectionState: ConnectionState = ConnectionState.IDLE,
     val nowMs: Long = System.currentTimeMillis(),
-    val unit: GlucoseUnit = GlucoseUnit.MGDL,
+    val unit: GlucoseUnit = GlucoseUnit.MMOL,
     val samples: List<GlucoseSample> = emptyList(),
     val trend: Trend = Trend.UNKNOWN,
     val stats: GlucoseStats = GlucoseStats(),
