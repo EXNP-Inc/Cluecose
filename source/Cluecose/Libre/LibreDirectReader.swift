@@ -1059,7 +1059,7 @@ final class LibreDirectReader {
         case .readerUnavailable: return .nfcUnavailable
         case .noTag: return .nfcNoTag
         case .multipleTags: return .nfcReadFailed("more than one tag detected — move other cards/tags away")
-        case .nonISO15693Tag: return .nfcReadFailed("tag is not a supported CGM sensor")
+        case .nonISO15693Tag: return .nfcReadFailed("tag is not a supported sensor")
         case .sessionAlreadyActive: return .nfcCancelled
         case .invalidActivationResponse(let raw):
             // Not a 0xB1 mismatch but an unexpected frame. Surface the exact

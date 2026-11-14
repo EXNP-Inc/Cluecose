@@ -1,5 +1,6 @@
 package com.dsikic.cluecose.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -49,11 +50,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.dsikic.cluecose.R
 import kotlin.math.roundToInt
 
 /**
@@ -82,7 +85,7 @@ fun MainScreen(
         }
 
         Text(
-            text = "Reads your sensor directly over Bluetooth — no account, no cloud. Not a medical device.",
+            text = "Not a medical device.",
             style = MaterialTheme.typography.labelSmall,
             color = CluecoseColors.white(0.35f),
             textAlign = TextAlign.Center,
@@ -94,7 +97,7 @@ fun MainScreen(
 
 /**
  * Header row shared by the root (it's always on screen, live or not):
- * "Cluecose" title + "CGM · direct Bluetooth" subtitle, the mg/dL / mmol/L
+ * the logo + "Cluecose" title + "Bluetooth" subtitle, the mg/dL / mmol/L
  * unit toggle, and the settings button.
  */
 @Composable
@@ -109,21 +112,29 @@ fun HeaderRow(
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(
-            verticalArrangement = Arrangement.spacedBy(1.dp),
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.weight(1f),
         ) {
-            Text(
-                text = "Cluecose",
-                fontWeight = FontWeight.Bold,
-                fontSize = 20.sp,
-                color = Color.White,
+            Image(
+                painter = painterResource(R.drawable.logo_emblem),
+                contentDescription = null,
+                modifier = Modifier.size(38.dp),
             )
-            Text(
-                text = "CGM · direct Bluetooth",
-                style = MaterialTheme.typography.labelMedium,
-                color = CluecoseColors.white(0.55f),
-            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(
+                    text = "Cluecose",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
+                    color = Color.White,
+                )
+                Text(
+                    text = "Bluetooth",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = CluecoseColors.white(0.55f),
+                )
+            }
         }
         UnitToggle(state.unit) { onUnitChange(it) }
         Spacer(modifier = Modifier.width(8.dp))

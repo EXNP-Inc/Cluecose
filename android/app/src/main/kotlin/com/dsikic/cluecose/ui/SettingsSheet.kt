@@ -137,7 +137,7 @@ fun SettingsSheet(
                 )
 
                 Text(
-                    text = "Reads your sensor directly over Bluetooth — no account, no cloud. Not a medical device.",
+                    text = "Not a medical device.",
                     style = MaterialTheme.typography.labelSmall,
                     color = CluecoseColors.white(0.35f),
                 )

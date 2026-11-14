@@ -55,7 +55,7 @@ class NfcActivationReader(activity: Activity) {
         /** No NFC adapter, or the adapter is disabled / the activity is not usable. */
         object ReaderUnavailable : Failure("NFC is not available on this device.")
         /** The tag was not an ISO 15693 (NfcV) tag. */
-        object TagNotIso15693 : Failure("tag is not a supported CGM sensor")
+        object TagNotIso15693 : Failure("tag is not a supported sensor")
         /** The RF exchange itself failed (tag left the field, controller error, …). */
         data class TransceiveFailed(val detail: String) : Failure("could not talk to the sensor: $detail")
         /** The sensor stored a different receiver ID (ISO 15693 error 0xB1). */

@@ -90,7 +90,7 @@ struct ContentView: View {
                     Text("Cluecose")
                         .font(.system(size: 20, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
-                    Text("CGM · direct Bluetooth")
+                    Text("Bluetooth")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.55))
                 }
@@ -566,7 +566,7 @@ struct ContentView: View {
     }
 
     private var footer: some View {
-        Text("Reads your sensor directly over Bluetooth — no account, no cloud. Optional Health app sync is on-device only.")
+        Text("Not a medical device.")
             .font(.caption2)
             .foregroundStyle(.white.opacity(0.35))
             .multilineTextAlignment(.center)

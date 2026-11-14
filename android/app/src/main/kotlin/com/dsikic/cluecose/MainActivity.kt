@@ -140,7 +140,7 @@ class MainActivity : ComponentActivity() {
 
 /**
  * Root: the full-bleed ocean-teal backdrop behind a scrollable column.
- * The header ("Cluecose / CGM · direct Bluetooth" + unit toggle + settings)
+ * The header (logo + "Cluecose" / "Bluetooth" + unit toggle + settings)
  * is always up, mirroring iOS `ContentView`; below it the listening state or
  * the live main screen, switched on the connection state.
  */
@@ -177,7 +177,7 @@ private fun CluecoseRoot(viewModel: GlucoseViewModel) {
                     onNfc = viewModel::nfcPair,
                 )
                 Text(
-                    text = "Reads your sensor directly over Bluetooth — no account, no cloud. Not a medical device.",
+                    text = "Not a medical device.",
                     style = MaterialTheme.typography.labelSmall,
                     color = CluecoseColors.white(0.35f),
                     textAlign = TextAlign.Center,
