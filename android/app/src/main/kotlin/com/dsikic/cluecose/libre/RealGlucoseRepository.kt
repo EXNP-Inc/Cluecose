@@ -523,7 +523,12 @@ class RealGlucoseRepository(
     ): Triple<DataPlaneCrypto, com.dsikic.cluecose.core.pairing.FirstPairPhase5KeyMaterial, Int?> {
         val phoneCert = PhoneCert.bundled162b()
         val nativeEphemeral = sessionKeyInstance.makeFirstPairNativeEphemeral { n -> secureRandomData(n) }
-        val flow = PairingFlow(gatt, phoneCert, phoneEph = nativeEphemeral.keyPair)
+        // logcat sink: PairingFlow phase boundaries (R2, Phase-5 key, Phase-5
+        // write, Phase-6 await) must be visible in field captures — the
+        // default eventLogger is a silent no-op (pair19 04:37:55→04:41:34
+        // black hole: zero flow lines for the 3.6-min derivation stall).
+        val flow = PairingFlow(gatt, phoneCert, phoneEph = nativeEphemeral.keyPair,
+            eventLogger = { m -> Log.i(TAG, m) })
         val result = flow.runCommandGatedFirstPairHandshake(
             blePIN = blePIN,
             maxEntropyAttempts = 1,
@@ -554,7 +559,7 @@ class RealGlucoseRepository(
         blePIN: ByteArray,
         rawKey: ByteArray,
     ): Pair<DataPlaneCrypto, Int> {
-        val flow = PairingFlow(gatt)
+        val flow = PairingFlow(gatt, eventLogger = { m -> Log.i(TAG, m) })
         val result = flow.runCachedReconnectHandshake(
             tail4 = blePIN,
             phase5RawKey = rawKey,
