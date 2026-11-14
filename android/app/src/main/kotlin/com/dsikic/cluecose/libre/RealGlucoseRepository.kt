@@ -12,6 +12,7 @@ import com.dsikic.cluecose.LinkKeeperService
 import com.dsikic.cluecose.app.tables.AssetsTablesSource
 import com.dsikic.cluecose.ble.DataCharRef
 import com.dsikic.cluecose.ble.DataPlaneListener
+import com.dsikic.cluecose.ble.DiscoveredSensor
 import com.dsikic.cluecose.ble.GattSession
 import com.dsikic.cluecose.ble.SensorScanner
 import com.dsikic.cluecose.ble.SensorScanError
@@ -129,6 +130,19 @@ class RealGlucoseRepository(
     /** Bumped on stop/forget/nfc-pair so a sleeping reconnect aborts. */
     @Volatile private var generation = 0
 
+    /**
+     * Set by [nfcPair] (main thread) BEFORE the reader-arming task is queued
+     * on [worker] — which may be busy for minutes inside a reconnect cycle
+     * (pair22 08:13: the arm task queued at :51.840 only ran at 08:19:03,
+     * after the user's hold, so the framework's default tag handler grabbed
+     * the sensor and the exchange timed out). The in-flight
+     * [connectAndAuthorize] checks this between attempts (and the scan's
+     * latch is interruptible) and hands the thread back to the queue
+     * immediately, tearing its session down first so no zombie GATT link
+     * races the fresh NFC connect.
+     */
+    @Volatile private var nfcPairRequested = false
+
     @Volatile private var gatt: GattSession? = null
 
     @Volatile private var linkActive = false
@@ -193,6 +207,13 @@ class RealGlucoseRepository(
                 try {
                     connectAndAuthorize(saved.blePIN, saved.bleAddress, saved, allowCached = true)
                 } catch (e: Exception) {
+                    // An NFC tap may have preempted the cycle (the throw is
+                    // the preemption, not the sensor) — the NFC connect owns
+                    // the thread now; don't report or reschedule.
+                    if (nfcPairRequested || nfcPairInFlight) {
+                        Log.i(TAG, "reconnect cycle yielded to NFC pair (${e.message})")
+                        return@runCatching
+                    }
                     Log.w(TAG, "reconnect failed: ${e.message}")
                     teardownSession() // discard the half-open GATT session, if any
                     emit(Event.Status("Reconnect failed: ${shortError(e)}"))
@@ -231,6 +252,17 @@ class RealGlucoseRepository(
         if (isWorking) return
         isWorking = true
         nfcPairInFlight = true
+        // Latch the preemption BEFORE queueing the arm task: a reconnect
+        // cycle running on [worker] must see it and yield within ~3 s (the
+        // scan slice-awaits), so the arm task runs NOW, not after the whole
+        // cycle. pair22 08:13: the arm task queued here only ran at 08:19:03
+        // (5 m 12 s later, after the user's hold) — the framework's default
+        // tag handler grabbed the sensor instead and the exchange timed out.
+        nfcPairRequested = true
+        // Invalidate any PENDING scheduled reconnect (it slept on the old
+        // generation). The running cycle yields via [nfcPairRequested]; if the
+        // tap ultimately fails, onNfcComplete restarts a single clean chain.
+        generation += 1
         emit(Event.NfcAwaiting(true))
         emit(Event.Status("Hold the top of the phone to the sensor — pairing over NFC…"))
         // Candidate ladder (mirrors iOS GlucoseModel.pair()): the receiver ID
@@ -249,9 +281,16 @@ class RealGlucoseRepository(
         reader.onComplete = { result, failure -> onNfcComplete(reader, result, failure) }
         worker.execute {
             // Release any existing link before the sensor switches to us.
+            // (The in-flight connect cycle is already preempted by
+            // [nfcPairRequested]; this clears whatever survives.)
             teardownSession()
             reconnecting = false
+            nfcPairRequested = false
             if (!nfcPairInFlight) return@execute
+            // The "reader is armed" status was emitted on tap; the arm now
+            // actually happens. `start()` posts enableReaderMode to the main
+            // thread and logs "reader mode armed" when it lands — that line
+            // is the ground truth for field captures.
             startReaderWithCurrentCandidate(reader)
         }
     }
@@ -342,6 +381,10 @@ class RealGlucoseRepository(
                         "otherwise pair the sensor fresh on this phone.",
                 ),
             )
+            // The tap preempted the auto-reconnect cycle; resume it for the
+            // still-paired sensor (the arm task already finished, the worker
+            // is free, and scheduleReconnect is a non-blocking worker.schedule).
+            if (state != null) scheduleReconnect()
             return
         }
 
@@ -350,6 +393,10 @@ class RealGlucoseRepository(
         if (result == null) {
             isWorking = false
             emit(Event.Status(failure?.message ?: "NFC pairing failed — try again."))
+            // Same as the ladder-exhaustion branch above: the preemption
+            // killed the reconnect cycle, so resume it for the still-paired
+            // sensor (the user can re-tap Pair at any time).
+            if (state != null) scheduleReconnect()
             return
         }
         // [isWorking] stays true through the BLE connect so a second
@@ -443,19 +490,43 @@ class RealGlucoseRepository(
         Log.i(TAG, "handshake: ${if (useCached) "CACHED (0x11)" else "FULL first-pair (03 03)"} (backfill: ${backfillReason ?: "no"})")
 
         for (attempt in 1..maxAttempts) {
+            if (nfcPairRequested) break // NFC tap preempted this cycle (see [nfcPair])
             emit(Event.Status(if (attempt == 1) {
                 "Looking for the sensor… (it opens a connection window about every minute)"
             } else {
                 "Still working on the pairing… (attempt $attempt/$maxAttempts)"
             }))
-            val discovered = sensorScanner.scanOnce(target, DISCOVERY_TIMEOUT_MS)
-                ?: throw RealGlucoseError.BleNotFound
-            val device = bluetoothDevice(discovered.address)
+            // Slice the scan window so an NFC tap preempts BETWEEN scans too —
+            // a mid-scan flag check only fires on the next slice (≤3 s
+            // latency); the whole 75 s window would hold the thread for 12.5
+            // min across 6 attempts before the queued arm task could run.
+            val scanDeadline = System.currentTimeMillis() + DISCOVERY_TIMEOUT_MS
+            var discovered: DiscoveredSensor? = null
+            while (System.currentTimeMillis() < scanDeadline && !nfcPairRequested) {
+                val sliceEnd = minOf(scanDeadline, System.currentTimeMillis() + 3_000)
+                val hit = sensorScanner.scanOnce(target, sliceEnd - System.currentTimeMillis())
+                if (hit != null) {
+                    discovered = hit
+                    break
+                }
+            }
+            if (discovered == null) {
+                if (nfcPairRequested) break // preempted — the NFC arm task is queued
+                throw RealGlucoseError.BleNotFound
+            }
+            val found: DiscoveredSensor = discovered
+            val device = bluetoothDevice(found.address)
 
             val session = GattSession(app)
             session.onDisconnected = { code -> onGattDropped(code, session) }
             this.gatt = session
-            val connectResult = runCatching { session.connect(device, discovered.name) }
+            val connectResult = runCatching { session.connect(device, found.name) }
+            // A drop can arrive while we're in connect; yield to the NFC
+            // task instead of continuing a doomed cycle.
+            if (nfcPairRequested) {
+                session.disconnect()
+                break
+            }
             if (connectResult.isFailure) {
                 val err = connectResult.exceptionOrNull()
                 lastError = err
@@ -789,6 +860,13 @@ class RealGlucoseRepository(
                 if (gatt !== session) return@runCatching
                 gatt = null
                 setLink(false)
+                // An NFC tap preempting this cycle drops the session we just
+                // tore down — don't schedule the reconnect loop, the NFC
+                // connect (allowCached=false) is taking over the thread.
+                if (nfcPairRequested || nfcPairInFlight) {
+                    Log.i(TAG, "link drop during NFC pair — skipping reconnect")
+                    return@runCatching
+                }
                 scheduleReconnect()
             }
         }
