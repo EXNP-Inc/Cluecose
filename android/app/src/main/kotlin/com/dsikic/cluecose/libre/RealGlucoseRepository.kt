@@ -427,15 +427,19 @@ class RealGlucoseRepository(
         var noncePrefix: Int? = null
 
         // ── Handshake choice: cached 0x11 or full 03 03 ─────────────────────
-        // The fast cached path reuses the saved Phase-5 key and resumes the
-        // realtime stream immediately, but its data plane is a *continuation*
-        // of the sensor's existing session: encrypted patchControl command
-        // writes (the backfill requests) are rejected (0xfd), so backfill is
-        // first-pair only. If the stored data is complete and current (the
-        // link just dropped briefly), take the fast 0x11; if there is a hole
-        // the realtime stream cannot fill, run the full 03 03.
+        // Once a Phase-5 key is stored, ALWAYS take the cached 0x11. pair20
+        // proved the cost of the opposite gate (`backfillReason == null`):
+        // after a first pair succeeds but the link dies before any sample is
+        // stored, `backfillNeededReason()` returns "no stored samples" for
+        // every reconnect — forcing the FULL 03 03 on an already-paired
+        // sensor, which rejects it at the ephemeral stage (24 s timer,
+        // reason-19 drop; 6/6 attempts lost, 8 min). The cached path's data
+        // plane is a continuation that may reject encrypted backfill writes
+        // (0xfd), so the backfill pass stays best-effort: the realtime
+        // stream + clinical re-subscribe burst still fill gaps, and a hard
+        // hole degrades to missing history — not a dead app.
         val backfillReason = backfillNeededReason()
-        val useCached = allowCached && s.phase5RawKey.size == 16 && backfillReason == null
+        val useCached = allowCached && s.phase5RawKey.size == 16
         Log.i(TAG, "handshake: ${if (useCached) "CACHED (0x11)" else "FULL first-pair (03 03)"} (backfill: ${backfillReason ?: "no"})")
 
         for (attempt in 1..maxAttempts) {
@@ -503,6 +507,10 @@ class RealGlucoseRepository(
         }
 
         emit(Event.Status("Authorized — arming the data stream…"))
+        // The `state` setter persists immediately (incl. the freshly learned
+        // phase5RawKey) — pair20 proved the key IS stored right after Phase 6;
+        // the reconnect failures were the useCached gate (below), not missing
+        // persistence.
         state = s
         setLink(true)
         s.lastGlucoseLifeCount?.let { lc -> emit(Event.SensorMeta(lc, false, s.serialNumber)) }
@@ -583,10 +591,23 @@ class RealGlucoseRepository(
         noncePrefix: Int?,
         backfillNeeded: Boolean,
     ) {
+        // Post-Phase-6 the sensor stays silent until each data-plane CCCD gets
+        // a fresh write (off→on, 90 ms settles, patchControl first). Arm FIRST:
+        // the first patchStatus/realtime that teaches us the life count only
+        // arrives once GLUCOSE_DATA/PATCH_STATUS are subscribed, so waiting
+        // for it before arming was a deadlock — pair20 05:32:57→05:34:30: 90 s
+        // of arming-less waiting, the sensor's ~24 s patience timer expired
+        // (reason-19 drop) and every re-arm hit a dead link (6 ×
+        // enable-notifications status 2147483647). With the stream armed, the
+        // life-count wait runs against a live pipe and is bounded to ~20 s
+        // (the sensor's patience window); a miss just starts the backfill
+        // from lc 0, which the historical channel covers.
+        gatt.rearmDataNotifications(enable = true)
+
         // Wait a bit for the first patchStatus/realtime to learn the current life count.
         var currentLC = state?.lastGlucoseLifeCount
         if (currentLC == null) {
-            for (i in 0 until 45) {
+            for (i in 0 until 10) {
                 currentLC = state?.lastGlucoseLifeCount
                 if (currentLC != null) break
                 Thread.sleep(2_000)
@@ -597,10 +618,6 @@ class RealGlucoseRepository(
             noncePrefix != null -> if (noncePrefix > 180) noncePrefix - 180 else 0
             else -> 0
         }
-
-        // Post-Phase-6 the sensor stays silent until each data-plane CCCD gets
-        // a fresh write (off→on, 90 ms settles, patchControl first).
-        gatt.rearmDataNotifications(enable = true)
 
         if (!backfillNeeded) {
             // Fast-path reconnect: no hole to fill. The reference never issues
