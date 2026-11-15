@@ -116,12 +116,10 @@ final class GlucoseModel: ObservableObject {
     /// One re-injection of demo data per 60 s (keeps the series "live" while
     /// the toggle is on).
     private var demoRefreshTask: Task<Void, Never>?
-    /// True while the demo-mode-off HealthKit purge is in flight — the 60 s
-    /// external refresh must not pull the not-yet-deleted demo rows back in.
+    /// True while a HealthKit wipe is in flight (the manual Settings wipe, or
+    /// the demo-mode-off cleanup) — the 60 s external refresh must not pull
+    /// the not-yet-deleted rows back in.
     private var demoPurgePending = false
-    /// Set once after the one-time cleanup of demo-mode rows that OLDER builds
-    /// (which wrote them while demo mode was on) left in the Health app.
-    private static let demoHKPurgedKey = "cluecose.demo.hkPurged"
 
     /// Blood-glucose readings older than this are considered stale.
     private let freshWindow: TimeInterval = 25 * 60
@@ -273,19 +271,10 @@ final class GlucoseModel: ObservableObject {
             await self?.foodLog.refreshSleepInsights()
         }
         WatchPusher.shared.activate()
-        // One-time migration: older builds wrote the synthetic demo series to
-        // Health while demo mode was on (the read-back then kept pulling it
-        // back in forever). This build never writes demo data — but rows
-        // already in Health need a single cleanup, so on the first launch of
-        // this build, if demo mode is OFF, purge our own 48 h of Health rows
-        // and re-sync the read-back. (While demo mode is ON, those rows are
-        // expected and the cleanup runs when it is switched off.)
-        if !demoMode,
-           !UserDefaults.standard.bool(forKey: Self.demoHKPurgedKey) {
-            UserDefaults.standard.set(true, forKey: Self.demoHKPurgedKey)
-            clog("DEMO: one-time cleanup — purging demo-mode rows older builds left in Health")
-            scheduleDemoHKPurge()
-        }
+        // NOTE: no auto-wipes at launch — older builds wrote the synthetic
+        // demo series to Health, and fire-and-forget cleanup kept racing the
+        // HealthKit grant. The user wipes history manually from Settings ›
+        // Data (wipeGlucoseHistory / clearFoodLog).
         // Chain the background link-keeper so a locked, suspended app still
         // re-acquires the sensor within the system's refresh cadence.
         scheduleLinkKeeper()
@@ -318,7 +307,13 @@ final class GlucoseModel: ObservableObject {
                 await self.healthKit.runProbeTest()
             }
             await self.refreshExternal()
-            await self.healthKit.write(self.samples)
+            // Never push demo samples to Health: the read-back would pull them
+            // straight back in as "external" data, so fake history would
+            // survive demo mode being switched off. (recomputeAll's write is
+            // already gated the same way; this is the startup catch-up write.)
+            if !demoMode {
+                await self.healthKit.write(self.samples)
+            }
             // Keep external sources fresh while the link is up: 60 s cadence.
             self.externalRefreshTask = Task { [weak self] in
                 while !Task.isCancelled {
@@ -444,11 +439,11 @@ final class GlucoseModel: ObservableObject {
             if directReader.hasSavedState {
                 directReader.start()
             }
-            // Purge the demo rows from Health, then re-sync the read-back so
-            // the merged series reflects real data only. (The 60 s external
-            // refresh is guarded while the purge is in flight, so the stale
-            // rows can't be pulled back in mid-purge.)
-            scheduleDemoHKPurge()
+            // Full wipe of this app's Health glucose rows (any age), then
+            // re-sync the read-back so the merged series reflects real data
+            // only. (The 60 s external refresh is guarded while the wipe is
+            // in flight, so the stale rows can't be pulled back in mid-wipe.)
+            scheduleFullWipe()
         }
         refreshDerived()
     }
@@ -492,13 +487,49 @@ final class GlucoseModel: ObservableObject {
         demoRefreshTask = nil
     }
 
-    /// Kick off the HealthKit demo-row purge (and, when done, the read-back
-    /// re-sync), guarding the 60 s external refresh for its duration.
-    private func scheduleDemoHKPurge() {
+    /// Manual "wipe glucose history" (Settings › Data). Deletes ALL this app's
+    /// Health glucose rows (any age), clears the in-memory + external series,
+    /// then re-syncs the read-back. The sensor pairing is left intact, so a
+    /// paired sensor simply re-streams fresh data over the wiped window.
+    /// Awaitable so the Settings UI can await the result. Guarding the 60 s
+    /// external refresh for the duration so not-yet-deleted rows can't be
+    /// pulled back in mid-wipe.
+    @MainActor
+    func wipeGlucoseHistory() async -> String {
+        if demoMode {
+            return "Turn off demo mode first — wiping under a live demo feed would just be re-filled."
+        }
+        demoPurgePending = true
+        defer { demoPurgePending = false }
+        samples = []
+        externalSamples = []
+        recomputeAll()
+        refreshDerived()
+        let deleted = await healthKit.wipeAllGlucose()
+        if healthKitEnabled {
+            await refreshExternal()
+        }
+        return deleted < 0
+            ? "Health app isn't connected, so nothing was removed there. In-memory history cleared."
+            : "Removed \(deleted) glucose row(s) from the Health app. History starts fresh from here."
+    }
+
+    /// Manual "clear food log" (Settings › Data). Deletes every meal entry.
+    @MainActor
+    func clearFoodLogData() async -> String {
+        let count = foodLog.store.all().count
+        foodLog.clearAll()
+        return "Cleared \(count) meal(s)."
+    }
+
+    /// Kick off the HealthKit full wipe (and, when done, the read-back
+    /// re-sync), guarding the 60 s external refresh for its duration. Used by
+    /// the demo-mode-off cleanup (the manual Settings wipe awaits inline).
+    private func scheduleFullWipe() {
         demoPurgePending = true
         Task { [weak self] in
             guard let self else { return }
-            await self.healthKit.purgeDemoGlucose()
+            _ = await self.healthKit.wipeAllGlucose()
             self.demoPurgePending = false
             if self.healthKitEnabled {
                 await self.refreshExternal()

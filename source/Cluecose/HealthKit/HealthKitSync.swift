@@ -40,6 +40,19 @@ final class HealthKitSync: ObservableObject {
     /// HealthKit has no built-in mg/dL factory; the unit string form is canonical.
     private let mgdlUnit = HKUnit(from: "mg/dL")
 
+    // Provenance metadata stamped on every sample this app writes, so the rows
+    // are identifiable in the Health app and trivially wipeable by us: a full
+    // "start fresh" delete can match on `source == cluecose` (any age), and demo
+    // data is flagged with `demo = 1` so it can be selected on its own.
+    static let metaSourceKey = "cluecose.source"
+    static let metaSourceValue = "cluecose"
+    static let metaDemoKey = "cluecose.demo"
+    static func writeMetadata(demo: Bool) -> [String: Any] {
+        var meta: [String: Any] = [metaSourceKey: metaSourceValue]
+        if demo { meta[metaDemoKey] = 1 }
+        return meta
+    }
+
     /// Whether the user has HealthKit integration switched on (default on).
     var enabled: Bool {
         get { UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool ?? true }
@@ -118,14 +131,17 @@ final class HealthKitSync: ObservableObject {
         }
     }
 
-    /// Write new samples (anything newer than the last one we saved).
-    func write(_ samples: [GlucoseSample]) async {
+    /// Write new samples (anything newer than the last one we saved). Every row
+    /// is stamped with provenance metadata (see `writeMetadata`); pass
+    /// `demo: true` for synthetic rows so they are self-identifying for a wipe.
+    func write(_ samples: [GlucoseSample], demo: Bool = false) async {
         guard available, authorized else { return }
         let lastWritten = (UserDefaults.standard.object(forKey: Self.lastWrittenKey) as? Date) ?? .distantPast
         let toWrite = samples
             .filter { $0.date > lastWritten }
             .sorted { $0.date < $1.date }
         guard !toWrite.isEmpty else { return }
+        let metadata = Self.writeMetadata(demo: demo)
 
         var written = 0
         for sample in toWrite {
@@ -134,7 +150,8 @@ final class HealthKitSync: ObservableObject {
                 type: sampleType,
                 quantity: quantity,
                 start: sample.date,
-                end: sample.date
+                end: sample.date,
+                metadata: metadata
             )
             do {
                 try await healthStore.save(hkSample)
@@ -146,54 +163,80 @@ final class HealthKitSync: ObservableObject {
             }
         }
         if written > 0 {
-            clog("HK wrote \(written) sample(s), newest \(toWrite.last!.date)")
+            clog("HK wrote \(written) sample(s)\(demo ? " [demo]" : ""), newest \(toWrite.last!.date)")
         }
     }
 
-    /// Delete the glucose samples THIS app wrote over the last 48 h. Used when
-    /// demo mode switches off: while demo mode was on, the synthetic series
-    /// (and any real samples before it) may have been pushed to Health, and
-    /// `readRecentSamples` would keep pulling them back in as "external" data
-    /// forever. Only our own source's rows are touched — samples from other
-    /// apps (manual entries, other CGMs) are never deleted (HealthKit only
-    /// allows deleting what you wrote, and this filters to our source anyway).
-    /// A paired real sensor re-streams and re-writes its data within minutes.
+    /// Delete ALL blood-glucose samples THIS app wrote — every age, not just
+    /// 48 h. Used for the "start fresh" wipe: older demo-mode builds pushed
+    /// the synthetic series to Health, `readRecentSamples` kept pulling it back
+    /// in as "external" data, and the first cleanup only covered 48 h (too
+    /// young for most of the seeded history). Only our own source's rows are
+    /// touched — samples from other apps (manual entries, other CGMs) are never
+    /// deleted (HealthKit only allows deleting what you wrote, and this
+    /// filters to our source anyway). A paired real sensor re-streams and
+    /// re-writes its data within minutes.
     /// Awaitable so the caller can re-sync the external read-back AFTER the
     /// purge finishes (no stale read-back race).
-    func purgeDemoGlucose() async {
-        guard available, authorized else { return }
-        let start = Date().addingTimeInterval(-48 * 3600)
-        let timePredicate = HKQuery.predicateForSamples(withStart: start, end: nil, options: .strictStartDate)
-        let predicate = HKSamplePredicate.quantitySample(
-            type: sampleType, predicate: timePredicate
-        )
-        let descriptor = HKSampleQueryDescriptor(
-            predicates: [predicate],
-            sortDescriptors: [SortDescriptor(\HKQuantitySample.startDate, order: .forward)],
-            limit: nil
-        )
-        let results: [HKQuantitySample]
-        do {
-            results = try await descriptor.result(for: healthStore)
-        } catch {
-            clog("HK purge: query failed: \(error)")
-            return
+    /// Returns the number of rows deleted (or -1 if the store wasn't
+    /// authorized when the call ran — the caller should retry once granted).
+    @discardableResult
+    func wipeAllGlucose() async -> Int {
+        guard available else { return -1 }
+        guard authorized else {
+            clog("HK wipe: skipped — not authorized yet (call after the grant)")
+            return -1
         }
-        // Delete only rows THIS app wrote (bundle match). HealthKit also
-        // enforces it — deleting another app's sample throws and is skipped.
-        let ourBundle = Bundle.main.bundleIdentifier
         var deleted = 0
-        for sample in results where sample.sourceRevision.source.bundleIdentifier == ourBundle {
+        // 1) Metadata-tagged rows (this build and forward, any age) — the easy
+        //    wipe path: one predicate, no scanning.
+        let tagPredicate = HKQuery.predicateForObjects(
+            withMetadataKey: Self.metaSourceKey, operatorType: .equalTo, value: Self.metaSourceValue
+        )
+        // 2) Source rows (any age) — catches pre-metadata history. There is no
+        //    bundle-direct predicate, so scan a wide window and keep only our
+        //    bundle in the loop (HealthKit enforces ownership anyway —
+        //    deleting another app's sample throws and is skipped).
+        let oldStart = Date().addingTimeInterval(-3 * 365 * 86_400)
+        let windowPredicate = HKQuery.predicateForSamples(withStart: oldStart, end: nil, options: .strictStartDate)
+        for (label, predicate) in [("tagged", tagPredicate), ("source", windowPredicate)] {
+            let samplePredicate = HKSamplePredicate.quantitySample(
+                type: sampleType, predicate: predicate
+            )
+            let descriptor = HKSampleQueryDescriptor(
+                predicates: [samplePredicate],
+                sortDescriptors: [SortDescriptor(\HKQuantitySample.startDate, order: .forward)],
+                limit: nil
+            )
+            let results: [HKQuantitySample]
             do {
-                try await healthStore.delete(sample)
-                deleted += 1
+                results = try await descriptor.result(for: healthStore)
             } catch {
-                clog("HK purge: delete failed (\(sample.startDate)): \(error)")
+                clog("HK wipe (\(label)): query failed: \(error)")
+                continue
             }
+            var n = 0
+            for sample in results {
+                // Belt and braces on the source pass (bundle match).
+                if label == "source",
+                   sample.sourceRevision.source.bundleIdentifier != Bundle.main.bundleIdentifier {
+                    continue
+                }
+                do {
+                    try await healthStore.delete(sample)
+                    n += 1
+                } catch {
+                    clog("HK wipe (\(label)): delete failed (\(sample.startDate)): \(error)")
+                }
+            }
+            clog("HK wipe (\(label)): removed \(n) Cluecose sample(s)")
+            deleted += n
         }
-        if deleted > 0 {
-            clog("HK purge: removed \(deleted) Cluecose sample(s) from the last 48 h (demo-mode cleanup)")
-        }
+        // 3) Reset the incremental-write pointer so a still-cached in-memory
+        //    series (demo or stale) can't be re-written row by row.
+        UserDefaults.standard.removeObject(forKey: Self.lastWrittenKey)
+        clog("HK wipe: complete — \(deleted) row(s) removed, write pointer reset")
+        return deleted
     }
 
     // MARK: Sleep (read-only, for the nutrition-sleep association)

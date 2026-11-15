@@ -166,6 +166,14 @@ final class LibreDirectReader {
     private var backfillTask: Task<Void, Never>?
     private var connectionWatcherTask: Task<Void, Never>?
     private var reconnectAttempt = 0
+    /// Set when the link drops while the backfill task is still running.
+    /// `scheduleReconnect()` guards on `backfillTask == nil`, so a drop during
+    /// a backfill can't be handled immediately; the backfill task's tail
+    /// (which clears `backfillTask`) re-triggers it. Without this, a drop
+    /// mid-backfill left the app claiming "Live" with no link, no data and
+    /// no further retries — the backfill set `backfillTask = nil` and nothing
+    /// ever re-ran `scheduleReconnect`.
+    private var reconnectPending = false
     private var linkActive = false
     private var isReconnecting = false
     private var cancelled = false
@@ -447,34 +455,58 @@ final class LibreDirectReader {
         var phase5RawKey: Data? = nil
         var phase6NoncePrefix: UInt16? = nil
         // ── Handshake choice: cached 0x11 or full 03 03 ─────────────────────
-        // The fast cached path (StartAuthorization 0x11) reuses the saved
-        // Phase-5 key and resumes the realtime stream immediately, but its
-        // data plane is a *continuation* of the sensor's existing session:
-        // encrypted patchControl command writes (the backfill requests) are
-        // rejected with a generic "Unknown ATT error" (0xfd), and the
-        // reference implementation confirms this by never issuing backfill
-        // on 0x11 — its proven reconnect+backfill path is the full 03 03
-        // handshake, where the data plane is freshly initialized.
+        // Two handshakes, each valid in exactly ONE situation:
         //
-        // So: if the stored data is complete and current (the link just
-        // dropped briefly), take the fast 0x11. If there is a hole the
-        // realtime stream cannot fill — the tail is stale (app suspended
-        // for hours) or there is a multi-hour gap in the last 24 h — run
-        // the full 03 03: the extra handshake time is worth a backfill the
-        // sensor will actually accept.
+        //   0x11 (StartAuthorization, "cached") — resumes the sensor's
+        //   EXISTING session using the saved Phase-5 key. This is the only
+        //   handshake that works on an already-paired sensor, and it resumes
+        //   the live realtime stream immediately. Its data plane is a
+        //   continuation of the sensor's session, so the 24 h patchControl
+        //   backfill writes are rejected (0xfd); the live stream plus the
+        //   clinical per-minute replay fill the data going forward.
+        //
+        //   03 03 (first pair) — establishes a NEW session. It ONLY works in
+        //   the brief window right after a fresh NFC activation on THIS
+        //   device, and it is the only path that freshly initializes the data
+        //   plane so the 24 h backfill is accepted. Re-running 03 03 on an
+        //   already-paired sensor POISONS the session (the sensor rejects the
+        //   duplicate first-pair and the link never streams). So 03 03 must
+        //   NEVER be used on a reconnect — even when the local sample store is
+        //   empty (a fresh device for this sensor). An empty store is filled by
+        //   the live stream, not by a 03 03 backfill, which can't be accepted
+        //   on a paired sensor anyway.
+        //
+        // Therefore a reconnect with a valid 16-byte key ALWAYS takes the
+        // cached 0x11 path. 03 03 is reserved for the fresh-NFC-pairing case
+        // (allowCached == false). If 0x11 is rejected (stale/mismatched key —
+        // e.g. the sensor was re-activated on another phone with a different
+        // receiver), we still fall back to 03 03 so a truly fresh pairing can
+        // complete; but on a live paired sensor that fallback fails, and the
+        // remedy is a fresh NFC re-activation on this device.
         let backfillReason = backfillNeededReason()
-        let useCached = allowCached
-            && newSessionState.phase5RawKey.count == 16
-            && backfillReason == nil
-        clog("Attempting \(useCached ? "CACHED (0x11)" : "FULL first-pair (03 03)") handshake… (backfill needed: \(backfillReason ?? "no"))")
-        if useCached,
-           let (fast, fastNoncePrefix) = try? await runCachedReconnect(
-                blePIN: blePIN,
-                session: sensorSession
-           ) {
-            dataCrypto = fast
-            phase6NoncePrefix = fastNoncePrefix
+        let useCached = allowCached && newSessionState.phase5RawKey.count == 16
+        clog("Attempting \(useCached ? "CACHED (0x11)" : "FULL first-pair (03 03)") handshake… (allowCached=\(allowCached) key=\(newSessionState.phase5RawKey.count)B backfill: \(backfillReason ?? "no"))")
+        if useCached {
+            do {
+                let (fast, fastNoncePrefix) = try await runCachedReconnect(
+                    blePIN: blePIN,
+                    session: sensorSession
+                )
+                dataCrypto = fast
+                phase6NoncePrefix = fastNoncePrefix
+                clog("CACHED (0x11) handshake OK — resuming the live stream")
+            } catch {
+                clog("CACHED (0x11) rejected: \(String(describing: error)) — falling back to FULL first-pair (03 03)")
+                let (crypto, material, noncePrefix) = try await runFirstPairHandshake(
+                    blePIN: blePIN,
+                    session: sensorSession
+                )
+                dataCrypto = crypto
+                phase5RawKey = material?.rawKey
+                phase6NoncePrefix = noncePrefix
+            }
         } else {
+            clog("FULL first-pair (03 03) — fresh-pairing path (allowCached=\(allowCached))")
             let (crypto, material, noncePrefix) = try await runFirstPairHandshake(
                 blePIN: blePIN,
                 session: sensorSession
@@ -701,6 +733,14 @@ final class LibreDirectReader {
         guard listenerTask != nil else { return }
         listenerTask = nil
         setLink(false)
+        if backfillTask != nil {
+            // The backfill task is still finishing against a (now dead) link.
+            // scheduleReconnect() would refuse (it guards on backfillTask ==
+            // nil), so remember to reconnect as soon as it clears.
+            reconnectPending = true
+            clog("link dropped while backfill in flight — reconnect deferred until backfill clears")
+            return
+        }
         scheduleReconnect()
     }
 
@@ -737,6 +777,43 @@ final class LibreDirectReader {
 
     // MARK: Backfill (24 h history so the chart is filled immediately)
 
+    /// Sequential data-plane re-arm (reference bootstrap order): off→on per
+    /// channel, patchControl first, 90 ms settles. MUST run exactly once per
+    /// connection, and as early as possible — the sensor stays silent (and
+    /// drops the link) until each data-plane CCCD gets a fresh write, and iOS
+    /// retains a characteristic's CCCD across a reconnect to the same
+    /// peripheral, so a bare setNotify(true) short-circuits (no CCCD write)
+    /// and the sensor stays un-armed. One pass only: re-arming patchControl
+    /// repeatedly around each backfill write (or via a parallel refresh) made
+    /// the write reject with "Unknown ATT error" [0xfd].
+    private func rearmDataPlane(_ sensorSession: SensorSession) async {
+        let rearmOrder: [(String, CBUUID)] = [
+            ("patchControl", LibreSensorGATT.Char.patchControl),
+            ("eventLog", LibreSensorGATT.Char.eventLog),
+            ("factoryData", LibreSensorGATT.Char.factoryData),
+            ("glucoseData", LibreSensorGATT.Char.glucoseData),
+            ("patchStatus", LibreSensorGATT.Char.patchStatus),
+        ]
+        for (name, uuid) in rearmOrder {
+            // The link dropping mid-re-arm means every remaining re-arm will
+            // just time out against a dead connection — stop and let the
+            // deferred reconnect (set by handleLinkDropped) re-pair cleanly.
+            guard linkActive else {
+                clog("rearm: aborted at \(name) — link is down, deferring to reconnect")
+                return
+            }
+            do {
+                try await sensorSession.setNotify(false, for: uuid, timeout: 10)
+                try await Task.sleep(for: .milliseconds(90))
+                try await sensorSession.setNotify(true, for: uuid, timeout: 10)
+                clog("rearm: \(name) off→on ok")
+                try await Task.sleep(for: .milliseconds(90))
+            } catch {
+                clog("rearm: \(name) failed: \(error)")
+            }
+        }
+    }
+
     private func startBackfill(
         _ sensorSession: SensorSession,
         crypto: DataPlaneCrypto,
@@ -746,7 +823,18 @@ final class LibreDirectReader {
         backfillTask?.cancel()
         backfillTask = Task { [weak self, sensorSession] in
             guard let self else { return }
-            // Wait a bit for the first patchStatus/realtime to learn the current life count.
+            // Re-arm the data plane IMMEDIATELY, before waiting for any
+            // streamed data. The sensor stays silent — and drops the
+            // connection — until each data-plane CCCD gets a fresh write, so
+            // waiting for a life count (which only arrives once the stream is
+            // armed) is a chicken-and-egg: a fresh device with no saved
+            // samples would time out the wait, the sensor would drop, and the
+            // re-arm would then run against a dead link. (This is why the same
+            // code worked on a device that already had a saved life count —
+            // the wait was skipped there and the re-arm landed in time.)
+            await self.rearmDataPlane(sensorSession)
+            // Now wait a bit for the first patchStatus/realtime to learn the
+            // current life count. Bail early if the link dies during the wait.
             var currentLC: UInt16? = self.state?.lastGlucoseLifeCount
             if currentLC == nil {
                 for _ in 0..<45 {
@@ -754,6 +842,7 @@ final class LibreDirectReader {
                         currentLC = lc
                         break
                     }
+                    if !self.linkActive { break }
                     try? await Task.sleep(for: .seconds(2))
                 }
             }
@@ -770,7 +859,15 @@ final class LibreDirectReader {
                 start = 0
             }
             await self.runBackfill(via: sensorSession, crypto: crypto, fromLifeCount: start, backfillNeeded: backfillNeeded)
+            // If the link dropped while we were busy, handleLinkDropped
+            // deferred the reconnect (backfillTask was still set). Re-arm it
+            // now that we're clearing.
+            let pending = self.reconnectPending
+            self.reconnectPending = false
             self.backfillTask = nil
+            if pending, !self.linkActive {
+                self.scheduleReconnect()
+            }
         }
     }
 
@@ -780,37 +877,9 @@ final class LibreDirectReader {
         fromLifeCount lifeCount: UInt16,
         backfillNeeded: Bool
     ) async {
-        // ── Sequential data-plane re-arm (reference bootstrap order) ───────
-        // Post-Phase-6 the sensor stays silent until each data-plane CCCD
-        // gets a fresh write, and iOS retains a characteristic's CCCD across
-        // a reconnect to the same peripheral — a bare setNotify(true)
-        // short-circuits (no CCCD write) and the sensor stays un-armed.
-        // Mirror the proven bootstrap exactly: SEQUENTIAL off→on per channel,
-        // patchControl first, 90 ms settles. One pass only — the reference
-        // rearms patchControl exactly once, and the encrypted backfill write
-        // below lands only after this whole pass has settled. (Earlier
-        // experiments that re-armed patchControl repeatedly around each
-        // write, or via a parallel task-group refresh, saw the write
-        // rejected with "Unknown ATT error" [0xfd].)
-        let rearmOrder: [(String, CBUUID)] = [
-            ("patchControl", LibreSensorGATT.Char.patchControl),
-            ("eventLog", LibreSensorGATT.Char.eventLog),
-            ("factoryData", LibreSensorGATT.Char.factoryData),
-            ("glucoseData", LibreSensorGATT.Char.glucoseData),
-            ("patchStatus", LibreSensorGATT.Char.patchStatus),
-        ]
-        for (name, uuid) in rearmOrder {
-            do {
-                try await session.setNotify(false, for: uuid, timeout: 10)
-                try await Task.sleep(for: .milliseconds(90))
-                try await session.setNotify(true, for: uuid, timeout: 10)
-                clog("backfill: re-arm \(name) off→on ok")
-                try await Task.sleep(for: .milliseconds(90))
-            } catch {
-                clog("backfill: re-arm \(name) failed: \(error)")
-            }
-        }
-
+        // The data-plane re-arm now runs once, up front, in startBackfill
+        // (BEFORE the life-count wait), because the sensor stays silent until
+        // its CCCDs are re-armed. See rearmDataPlane().
         guard backfillNeeded else {
             // Fast-path reconnect: no hole to fill. The reference never
             // issues backfill commands on a cached reconnect, and our data
@@ -1022,6 +1091,7 @@ final class LibreDirectReader {
         listenerTask = nil
         backfillTask?.cancel()
         backfillTask = nil
+        reconnectPending = false
         if let session {
             scanner.disconnect(session)
         }

@@ -609,6 +609,13 @@ struct SettingsSheet: View {
     @EnvironmentObject var model: GlucoseModel
     @Environment(\.dismiss) private var dismiss
     @State private var showClearConfirm = false
+    // Manual history wipes (no auto-wipes — the user decides).
+    @State private var showGlucoseWipeConfirm = false
+    @State private var showFoodWipeConfirm = false
+    @State private var wipeGlucoseBusy = false
+    @State private var wipeFoodBusy = false
+    @State private var wipeGlucoseResult: String?
+    @State private var wipeFoodResult: String?
     // Nutrition analysis (LLM) settings.
     @State private var llmBaseURL = FoodLLMConfig.load().baseURL
     @State private var llmModel = FoodLLMConfig.load().model
@@ -644,6 +651,71 @@ struct SettingsSheet: View {
                     } else {
                         LabeledContent("Health app", value: "unavailable")
                     }
+
+                    // Manual history wipes — nothing is wiped automatically.
+                    // A paired sensor re-streams fresh data over a wiped window.
+                    if !model.demoMode {
+                        Button {
+                            showGlucoseWipeConfirm = true
+                        } label: {
+                            if wipeGlucoseBusy {
+                                HStack { ProgressView(); Text("Wiping…") }
+                            } else {
+                                Label("Wipe glucose history", systemImage: "trash")
+                            }
+                        }
+                        .disabled(wipeGlucoseBusy || wipeFoodBusy)
+                        if let result = wipeGlucoseResult {
+                            Text(result)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Button {
+                            showFoodWipeConfirm = true
+                        } label: {
+                            if wipeFoodBusy {
+                                HStack { ProgressView(); Text("Clearing…") }
+                            } else {
+                                Label("Clear food log", systemImage: "fork.knife")
+                            }
+                        }
+                        .disabled(wipeGlucoseBusy || wipeFoodBusy)
+                        if let result = wipeFoodResult {
+                            Text(result)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                // Confirmation + run for the two manual wipes.
+                .confirmationDialog("Wipe all glucose history?",
+                                    isPresented: $showGlucoseWipeConfirm, titleVisibility: .visible) {
+                    Button("Wipe all glucose history", role: .destructive) {
+                        Task {
+                            wipeGlucoseBusy = true
+                            wipeGlucoseResult = nil
+                            wipeGlucoseResult = await model.wipeGlucoseHistory()
+                            wipeGlucoseBusy = false
+                        }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Removes every glucose reading this app wrote to the Health app (any age) and clears the on-device chart. Your paired sensor keeps working and re-streams fresh readings.")
+                }
+                .confirmationDialog("Clear the entire food log?",
+                                    isPresented: $showFoodWipeConfirm, titleVisibility: .visible) {
+                    Button("Clear food log", role: .destructive) {
+                        Task {
+                            wipeFoodBusy = true
+                            wipeFoodResult = nil
+                            wipeFoodResult = await model.clearFoodLogData()
+                            wipeFoodBusy = false
+                        }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Deletes every meal entry, including photos. This can't be undone.")
                 }
 
                 Section("Demo mode") {

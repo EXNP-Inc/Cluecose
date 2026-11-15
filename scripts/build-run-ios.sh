@@ -23,13 +23,23 @@ if [[ $# -ge 1 ]]; then
     if [[ ${#DEVICE} -ge 10 && ${#DEVICE} -le 40 && -z ${DEVICE//[0-9A-Fa-f-]/} && "$DEVICE" == *-* ]]; then
         UDID=$DEVICE
     else
-        ROW=$(xcrun devicectl list devices 2>/dev/null | grep -E "^[[:space:]]*$DEVICE[[:space:]]" | head -1)
-        UDID=$(printf '%s\n' "$ROW" | grep -Eo '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}' | head -1)
-        if [[ -z "$UDID" ]]; then
+        # `|| true` on every grep so a no-match can't trip `set -e`+`pipefail`
+        # and kill the script silently (this exact bug hid a parse failure).
+        ROW=$(xcrun devicectl list devices 2>/dev/null | grep -E "^[[:space:]]*$DEVICE[[:space:]]" | head -1 || true)
+        if [[ -z "$ROW" ]]; then
             echo "✗ device '$DEVICE' not found in 'devicectl list devices'"
             exit 1
         fi
-        STATE=$(printf '%s\n' "$ROW" | grep -Eo 'unavailable|connected|available \(paired\)|unpaired|shutdown' | head -1)
+        # Grab the token immediately before " (UDID)" — works for BOTH the
+        # 25-char (8-16) physical UDID and the 36-char (8-4-4-4-12) form.
+        # (A fixed 8-4-4-4-12 regex here silently failed on the 25-char form.)
+        UDID=$(printf '%s\n' "$ROW" | sed -E 's/.* ([0-9A-Fa-f-]+) \(UDID\).*/\1/')
+        if [[ -z "$UDID" ]]; then
+            echo "✗ could not parse a UDID from the '$DEVICE' row:"
+            printf '  %s\n' "$ROW"
+            exit 1
+        fi
+        STATE=$(printf '%s\n' "$ROW" | grep -Eo 'unavailable|connected|available \(paired\)|unpaired|shutdown' | head -1 || true)
         if [[ "$STATE" != "connected" && "$STATE" != "available (paired)" ]]; then
             echo "✗ device '$DEVICE' is not connected (state: ${STATE:-unknown})."
             echo "  Unlock the phone and check the USB/Wi-Fi connection, then retry."

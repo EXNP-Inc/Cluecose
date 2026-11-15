@@ -513,6 +513,17 @@ final class FoodLogModel: ObservableObject {
         refresh()
     }
 
+    /// Remove EVERY meal entry (and their persisted state). Used by the
+    /// "start fresh" wipe. Photos on disk are left behind (harmless orphans);
+    /// the entries + their persisted JSON are gone.
+    func clearAll() {
+        let count = store.all().count
+        guard count > 0 else { return }
+        store.persistAll([])
+        clog("FOOD: start-fresh — cleared \(count) meal(s)")
+        refresh()
+    }
+
     /// Remove an entry and its photos.
     func delete(_ entry: FoodEntry) {
         store.delete(id: entry.id)
