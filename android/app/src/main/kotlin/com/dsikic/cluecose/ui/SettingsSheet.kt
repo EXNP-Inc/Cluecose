@@ -19,10 +19,13 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -61,7 +64,18 @@ fun SettingsSheet(
     onDismiss: () -> Unit,
     onRePair: () -> Unit,
     onForgetSensor: () -> Unit,
+    /** Manual history wipes (iOS Settings › Data). Nothing is wiped
+     * automatically. [onWipeGlucoseHistory] / [onClearFoodLog] return the
+     * number of rows/meals removed so the result can be shown inline. */
+    onWipeGlucoseHistory: () -> Int,
+    onClearFoodLog: () -> Int,
 ) {
+    // Confirmation state for the two manual wipes (iOS confirmationDialogs).
+    var showGlucoseWipeConfirm by remember { mutableStateOf(false) }
+    var showFoodWipeConfirm by remember { mutableStateOf(false) }
+    var wipeGlucoseResult by remember { mutableStateOf<String?>(null) }
+    var wipeFoodResult by remember { mutableStateOf<String?>(null) }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -146,6 +160,37 @@ fun SettingsSheet(
                     value = if (Build.VERSION.SDK_INT >= 28) "Not set up" else "Unavailable",
                     modifier = Modifier.fillMaxWidth(),
                 )
+                // Manual history wipes — nothing is wiped automatically (the
+                // iOS auto-wipe race was removed in favor of explicit taps).
+                // A paired sensor re-streams fresh data over a wiped window.
+                DestructiveRow(
+                    text = "Wipe glucose history",
+                    onClick = {
+                        wipeGlucoseResult = null
+                        showGlucoseWipeConfirm = true
+                    },
+                )
+                wipeGlucoseResult?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = CluecoseColors.white(0.5f),
+                    )
+                }
+                DestructiveRow(
+                    text = "Clear food log",
+                    onClick = {
+                        wipeFoodResult = null
+                        showFoodWipeConfirm = true
+                    },
+                )
+                wipeFoodResult?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = CluecoseColors.white(0.5f),
+                    )
+                }
 
                 // MARK: Nutrition analysis (LLM)
                 NutritionSection()
@@ -175,6 +220,87 @@ fun SettingsSheet(
                     .padding(vertical = 12.dp),
             )
         }
+    }
+
+    // Confirmation + run for the two manual wipes (iOS confirmationDialogs).
+    if (showGlucoseWipeConfirm) {
+        AlertDialog(
+            onDismissRequest = { showGlucoseWipeConfirm = false },
+            title = { Text("Wipe all glucose history?") },
+            text = {
+                Text(
+                    "Removes every glucose reading this app has stored (any age) and " +
+                        "clears the on-device chart. Your paired sensor keeps working " +
+                        "and re-streams fresh readings.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showGlucoseWipeConfirm = false
+                    val n = onWipeGlucoseHistory()
+                    wipeGlucoseResult =
+                        "Removed $n reading(s). History starts fresh from here."
+                }) {
+                    Text("Wipe all glucose history")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showGlucoseWipeConfirm = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+    if (showFoodWipeConfirm) {
+        AlertDialog(
+            onDismissRequest = { showFoodWipeConfirm = false },
+            title = { Text("Clear the entire food log?") },
+            text = {
+                Text("Deletes every meal entry, including photos. This can't be undone.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showFoodWipeConfirm = false
+                    val n = onClearFoodLog()
+                    wipeFoodResult = "Cleared $n meal(s)."
+                }) {
+                    Text("Clear food log")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFoodWipeConfirm = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+}
+
+/** A destructive action row (red label + trash icon), for the manual wipes. */
+@Composable
+private fun DestructiveRow(text: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp)
+            .clickable(onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Delete,
+            contentDescription = null,
+            tint = CluecoseColors.GlowHigh,
+            modifier = Modifier.size(14.dp),
+        )
+        Text(
+            text = text,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            color = CluecoseColors.GlowHigh,
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 8.dp),
+        )
     }
 }
 

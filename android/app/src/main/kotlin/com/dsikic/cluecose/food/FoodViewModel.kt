@@ -163,6 +163,10 @@ class FoodViewModel
         var caffeineMg: Double? = null,
         var alcoholG: Double? = null,
         var citations: List<SourceCitation> = emptyList(),
+        /// When the meal was (date/time picker, default now — logging
+        /// after-the-fact). null on edit = keep the stored date.
+        /// (iOS `MealValues.date`.)
+        var dateEpochSeconds: Double? = null,
     )
 
     /**
@@ -193,7 +197,12 @@ class FoodViewModel
         isEstimated: Boolean,
         photos: List<ByteArray> = emptyList(),
     ): FoodEntry {
-        val dateSec = (existing?.dateEpochSeconds) ?: (System.currentTimeMillis() / 1000.0)
+        // The picker supplies the meal time (default now; after-the-fact
+        // logging picks an earlier time). On edit it pre-fills with the
+        // stored date, so an untouched save keeps it.
+        val dateSec = values.dateEpochSeconds
+            ?: existing?.dateEpochSeconds
+            ?: System.currentTimeMillis() / 1000.0
         val id = existing?.id ?: newEntryId()
 
         var entry = FoodEntry(
@@ -236,6 +245,22 @@ class FoodViewModel
         refresh()
         recomputeInsights(force = true)
         return entry
+    }
+
+    /**
+     * Manual "clear food log" (Settings → Data). Deletes every meal entry
+     * and its photos. Returns the number of meals cleared.
+     * (iOS `FoodLogModel.clearAll` / `GlucoseModel.clearFoodLogData`.)
+     */
+    fun clearAll(): Int {
+        val entries = store.all()
+        for (e in entries) store.deletePhotos(e.id)
+        if (entries.isNotEmpty()) {
+            store.persistAll(emptyList())
+            refresh()
+            recomputeInsights(force = true)
+        }
+        return entries.size
     }
 
     // MARK: One-shot entry actions (card "Add meal" quick path)

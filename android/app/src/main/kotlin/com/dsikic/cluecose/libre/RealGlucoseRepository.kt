@@ -340,6 +340,33 @@ class RealGlucoseRepository(
         }
     }
 
+    /**
+     * Manual "wipe glucose history" (Settings → Data). Clears the on-device
+     * glucose rows — the in-memory 48 h map AND its persisted prefs copy —
+     * so the chart starts fresh. The pairing (state + 16 B Phase-5 key) is
+     * left INTACT and the live stream is not touched, so a paired sensor
+     * simply re-streams fresh readings over the wiped window (same contract
+     * as iOS `wipeGlucoseHistory`; Android has no Health store to delete
+     * from — the on-device rows ARE the history).
+     *
+     * Runs on the caller thread: the critical section is the map clear
+     * (guarded by [storeLock]) and a prefs `apply()` — no GATT work. A
+     * packet ingesting concurrently may survive the wipe (one new row);
+     * that is the same race the iOS wipe has with live HealthKit writes.
+     * Returns the number of rows removed.
+     */
+    override fun wipeGlucoseHistory(): Int {
+        val removed = synchronized(storeLock) { sampleStore.size.also { sampleStore.clear() } }
+        prefs.edit().remove(SAMPLES_KEY).apply()
+        // Let the stored-samples replay (a no-op now) re-arm for the fresh
+        // rows the live stream writes from here on.
+        samplesEmitted = false
+        Log.i(TAG, "wipeGlucoseHistory: removed $removed row(s) (pairing intact)")
+        emit(Event.Samples(emptyList()))
+        emit(Event.Status("Glucose history cleared — $removed reading(s) removed. The sensor keeps streaming fresh readings."))
+        return removed
+    }
+
     // MARK: NFC completion (main thread, via the reader)
 
     private fun onNfcComplete(

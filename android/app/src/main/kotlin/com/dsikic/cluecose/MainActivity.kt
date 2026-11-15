@@ -246,6 +246,9 @@ private fun CluecoseRoot(viewModel: GlucoseViewModel, foodViewModel: FoodViewMod
                     showSettings = false
                     viewModel.forgetSensor()
                 },
+                // Manual history wipes (the sheet shows the result inline).
+                onWipeGlucoseHistory = { viewModel.wipeGlucoseHistory() },
+                onClearFoodLog = { foodViewModel.clearAll() },
             )
         }
 

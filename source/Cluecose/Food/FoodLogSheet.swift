@@ -45,6 +45,9 @@ struct FoodLogSheet: View {
     @State private var descriptionText = ""
     @State private var servingText = ""
     @State private var contextText = ""
+    /// When the meal was — defaults to now; pick an earlier time to log
+    /// after-the-fact. Capped at now (you can't eat in the future).
+    @State private var mealDate: Date = Date()
 
     // Photos (photo mode): library picker items + the actual data.
     @State private var photoItems: [PhotosPickerItem] = []
@@ -117,6 +120,16 @@ struct FoodLogSheet: View {
                         .autocorrectionDisabled(false)
                     TextField("Context (optional)", text: $contextText)
                         .autocorrectionDisabled(false)
+                    // When it was eaten — defaults to now; pick earlier to log
+                    // after-the-fact. Capped at now (no future meals).
+                    DatePicker("When did you eat it?",
+                               selection: $mealDate,
+                               in: ...Date(),
+                               displayedComponents: [.date, .hourAndMinute])
+                    if mealDate.distance(to: Date()) > 60 {
+                        Button("Back to now") { mealDate = Date() }
+                            .font(.footnote)
+                    }
                     Text("What the camera can't know: portion, brand, preparation, hidden ingredients.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -400,7 +413,8 @@ struct FoodLogSheet: View {
             caffeineMg: rowValue(caffeineText, origin: rowOrigins[6]),
             alcoholG: rowValue(alcoholText, origin: rowOrigins[7]),
             citations: citations,
-            portionMultiplier: portion
+            portionMultiplier: portion,
+            date: mealDate
         )
         let photosToSend = mode == .photo ? photos : []
         let saved = await model.saveEntry(existing: existing,
@@ -481,6 +495,7 @@ struct FoodLogSheet: View {
             descriptionText = e.description
             servingText = e.serving ?? ""
             contextText = e.context ?? ""
+            mealDate = e.date
             portion = e.portionMultiplier
             // Show the UNSCALED base in the rows: the stored values are
             // base × portion, and the slider carries the portion — so the

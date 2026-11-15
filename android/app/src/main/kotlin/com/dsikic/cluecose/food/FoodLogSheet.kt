@@ -40,9 +40,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.DatePickerState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -67,12 +75,18 @@ import com.dsikic.cluecose.core.food.NutritionPrompt
 import com.dsikic.cluecose.core.food.SourceCitation
 import com.dsikic.cluecose.ui.CluecoseColors
 import java.io.File
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.launch
 
 /**
  * The add/edit meal sheet. [existing] = null for a new meal; an entry for
  * edit mode (prefills all fields). Presented as a Dialog (like SettingsSheet).
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FoodLogSheet(
     viewModel: FoodViewModel,
@@ -89,6 +103,12 @@ fun FoodLogSheet(
     var descriptionText by remember { mutableStateOf(existing?.description.orEmpty()) }
     var servingText by remember { mutableStateOf(existing?.serving.orEmpty()) }
     var contextText by remember { mutableStateOf(existing?.context.orEmpty()) }
+    // When the meal was (epoch ms) — defaults to now; pick an earlier time to
+    // log after-the-fact. Prefilled from the entry on edit. (iOS mealDate.)
+    val nowMs = System.currentTimeMillis()
+    var mealDateMs by remember { mutableStateOf(existing?.dateEpochSeconds?.toLong()?.times(1000) ?: nowMs) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showTimePicker by remember { mutableStateOf(false) }
 
     // Nutrient rows (editable; prefilled from an estimate or an edit).
     var kcalText by remember { mutableStateOf(number(existing?.caloriesKcal)) }
@@ -208,6 +228,38 @@ fun FoodLogSheet(
                     label = { Text("Context (optional)", fontSize = 12.sp) },
                     modifier = Modifier.fillMaxWidth(),
                 )
+                // When it was eaten — defaults to now; pick an earlier time to
+                // log after-the-fact. Capped at now (no future meals).
+                // (iOS DatePicker row in FoodLogSheet.)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 3.dp),
+                ) {
+                    Text(
+                        text = "When did you eat it?",
+                        fontSize = 14.sp,
+                        color = Color.White,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = Instant.ofEpochMilli(mealDateMs)
+                            .atZone(ZoneId.systemDefault())
+                            .format(MEAL_DATE_FORMAT),
+                        fontSize = 14.sp,
+                        color = CluecoseColors.GlowInRange,
+                    )
+                    Text(
+                        text = "Change",
+                        fontSize = 13.sp,
+                        color = CluecoseColors.white(0.7f),
+                        modifier = Modifier
+                            .background(CluecoseColors.white(0.08f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                            .clickable { showDatePicker = true },
+                    )
+                }
                 Text(
                     text = "What the camera can't know: portion, brand, preparation, hidden ingredients.",
                     style = MaterialTheme.typography.labelSmall,
@@ -403,6 +455,7 @@ fun FoodLogSheet(
                                 caffeineMg = parse(caffeineText),
                                 alcoholG = parse(alcoholText),
                                 citations = citations,
+                                dateEpochSeconds = mealDateMs / 1000.0,
                             )
                             val isEstimated = if (existing != null) false else hasEstimated
                             val photosToSave = if (modeIsPhoto) photos.mapNotNull { it.toJpegBytes(context) } else emptyList()
@@ -414,9 +467,101 @@ fun FoodLogSheet(
             }
         }
     }
+
+    // Meal date/time pickers (Material3). Date first, then time; either can
+    // be picked alone (the other half of the current mealDateMs is kept).
+    // Future dates clamp back to now — you can't log a meal that hasn't
+    // happened. (iOS DatePicker row, capped at now.)
+    if (showDatePicker) {
+        // Year range: the sensor's era through this year — no future years
+        // (Material3 1.3 has no day-level range; the apply clamps to now).
+        val thisYear = LocalDate.now().year
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = mealDateMs,
+            yearRange = 2020..thisYear,
+        )
+        AlertDialog(
+            onDismissRequest = { showDatePicker = false },
+            title = { Text("When did you eat it?") },
+            text = {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    DatePicker(state = datePickerState)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextButton(onClick = { mealDateMs = System.currentTimeMillis() }) {
+                        Text("Back to now")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = datePickerState.selectedDateMillis != null,
+                    onClick = {
+                        val picked = datePickerState.selectedDateMillis
+                        if (picked != null) {
+                            // Keep the current time-of-day, clamp to now
+                            // (a later-in-today day would be a future meal).
+                            val zone = ZoneId.systemDefault()
+                            val keptTime = LocalTime.ofInstant(
+                                Instant.ofEpochMilli(mealDateMs), zone,
+                            )
+                            val newDay = Instant.ofEpochMilli(picked)
+                                .atZone(zone).toLocalDate()
+                            val ms = newDay.atTime(keptTime)
+                                .atZone(zone).toInstant().toEpochMilli()
+                            mealDateMs = ms.coerceAtMost(nowMs)
+                        }
+                        showDatePicker = false
+                        showTimePicker = true
+                    },
+                ) { Text("Next: time") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
+            },
+        )
+    }
+    if (showTimePicker) {
+        val zone = ZoneId.systemDefault()
+        val current = Instant.ofEpochMilli(mealDateMs).atZone(zone)
+        val timePickerState = rememberTimePickerState(
+            initialHour = current.hour,
+            initialMinute = current.minute,
+        )
+        AlertDialog(
+            onDismissRequest = { showTimePicker = false },
+            title = { Text("What time?") },
+            text = {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    TimePicker(state = timePickerState)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val newTime = current.toLocalDate()
+                        .atTime(timePickerState.hour, timePickerState.minute)
+                    var ms = newTime.atZone(zone).toInstant().toEpochMilli()
+                    if (ms > nowMs) ms = nowMs // no future meals
+                    mealDateMs = ms
+                    showTimePicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTimePicker = false }) { Text("Cancel") }
+            },
+        )
+    }
 }
 
 // MARK: - Sub-components
+
+private val MEAL_DATE_FORMAT: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("EEE, MMM d · h:mm a")
 
 @Composable
 private fun ModeSegment(isPhoto: Boolean, onSelect: (Boolean) -> Unit) {

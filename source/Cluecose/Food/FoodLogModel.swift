@@ -206,6 +206,9 @@ final class FoodLogModel: ObservableObject {
         /// Portion slider (0.1…4.0, default 1.0) — how much of the described
         /// portion the user actually ate.
         var portionMultiplier: Double = 1.0
+        /// When the meal was (date picker, default now — logging
+        /// after-the-fact). nil on edit = keep the stored date.
+        var date: Date? = nil
     }
 
     /// Run the LLM estimate (exposes `isEstimating` for the UI spinner).
@@ -235,8 +238,9 @@ final class FoodLogModel: ObservableObject {
     ///
     /// Photos in `photos` replace the entry's stored photos (old files are
     /// removed) — but only when the photo set actually changed, so a save
-    /// that doesn't touch photos rewrites nothing. The entry's date is
-    /// preserved on edit and is "now" for new entries.
+    /// that doesn't touch photos rewrites nothing. The meal date comes from
+    /// `values.date` (the picker; default now, so after-the-fact logging
+    /// works); nil falls back to the stored date (edit) or now (new).
     @discardableResult
     func saveEntry(existing: FoodEntry?,
                    values: MealValues,
@@ -248,7 +252,9 @@ final class FoodLogModel: ObservableObject {
         let current: FoodEntry? = id == existing?.id
             ? store.all().first { $0.id == id }
             : nil
-        let date = current?.date ?? Date()
+        // The picker supplies the meal time (default now); on edit it
+        // pre-fills with the stored date, so an untouched save keeps it.
+        let date = values.date ?? current?.date ?? Date()
 
         var entry = FoodEntry(
             id: id,

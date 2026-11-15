@@ -497,8 +497,10 @@ final class GlucoseModel: ObservableObject {
     @MainActor
     func wipeGlucoseHistory() async -> String {
         if demoMode {
+            clog("Settings: wipe glucose tapped — REJECTED (demo mode on)")
             return "Turn off demo mode first — wiping under a live demo feed would just be re-filled."
         }
+        clog("Settings: wipe glucose tapped — starting (\(samples.count) in-memory, \(externalSamples.count) external)")
         demoPurgePending = true
         defer { demoPurgePending = false }
         samples = []
@@ -518,6 +520,7 @@ final class GlucoseModel: ObservableObject {
     @MainActor
     func clearFoodLogData() async -> String {
         let count = foodLog.store.all().count
+        clog("Settings: clear food log tapped — \(count) meal(s)")
         foodLog.clearAll()
         return "Cleared \(count) meal(s)."
     }

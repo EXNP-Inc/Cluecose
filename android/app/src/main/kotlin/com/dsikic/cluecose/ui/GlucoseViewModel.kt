@@ -53,6 +53,15 @@ interface GlucoseRepository {
 
     /** Forget the paired sensor (clears persisted pairing state; iOS `clearSensor`). */
     fun forgetSensor()
+
+    /**
+     * Manual "wipe glucose history" (Settings → Data): clears the on-device
+     * glucose rows (in-memory + persisted) — the sensor pairing is left
+     * intact and a paired sensor re-streams fresh readings. (iOS
+     * `wipeGlucoseHistory`, sans the HealthKit delete — Android has no
+     * Health store.) Returns the number of rows removed.
+     */
+    fun wipeGlucoseHistory(): Int
 }
 
 /**
@@ -114,6 +123,11 @@ class GlucoseViewModel
 
     fun forgetSensor() {
         repository.forgetSensor()
+    }
+
+    /** Manual "wipe glucose history" (Settings → Data). Pairing stays intact. */
+    fun wipeGlucoseHistory(): Int {
+        return repository.wipeGlucoseHistory()
     }
 
     /**
