@@ -70,6 +70,56 @@ data class FoodUiState(
 )
 
 /**
+ * The per-meal analytics state, as of `now` (iOS `FoodLogModel.MealAnalytics`):
+ *
+ *  • [Ready]   — the insight has been computed and is on the entry.
+ *  • [Pending] — the post-meal window hasn't fully elapsed yet: the curve is
+ *    still forming, and the analysis will run at [Pending.readyAtMs].
+ *  • [Settled] — the window has fully elapsed and the engine ran (or found
+ *    the curve flat / the data too sparse to judge): no insight will ever
+ *    appear for this meal. Terminal, not "waiting".
+ *  • [NoData]  — the app has no glucose series at all, so nothing can be
+ *    analyzed yet.
+ */
+sealed interface MealAnalytics {
+    object Ready : MealAnalytics
+    data class Pending(val readyAtMs: Long, val remainingMin: Int) : MealAnalytics
+    object Settled : MealAnalytics
+    object NoData : MealAnalytics
+
+    /** True while the insight is still being awaited. */
+    val isPending: Boolean
+        get() = this is Pending
+}
+
+/**
+ * The pure analytics-state decision (kept static so it is unit-testable
+ * without a model) — the Android twin of iOS `analyticsState`.
+ *
+ * @param windowMin the post-meal window in minutes (the engine's default, 180).
+ */
+fun analyticsState(
+    insight: com.dsikic.cluecose.core.food.MealInsight?,
+    hasSamples: Boolean,
+    mealDateEpochSeconds: Double,
+    nowEpochSeconds: Double,
+    windowMin: Double = InsightConfig.DEFAULT.postWindowMin,
+): MealAnalytics {
+    if (insight != null) return MealAnalytics.Ready
+    if (!hasSamples) return MealAnalytics.NoData
+    val readyAtEpoch = mealDateEpochSeconds + windowMin * 60
+    val remaining = readyAtEpoch - nowEpochSeconds
+    return if (remaining > 0) {
+        MealAnalytics.Pending(
+            readyAtMs = (readyAtEpoch * 1000).toLong(),
+            remainingMin = Math.ceil(remaining / 60).toInt(),
+        )
+    } else {
+        MealAnalytics.Settled
+    }
+}
+
+/**
  * The food-log model. [Application]-backed so it can construct the real
  * [FoodRepository] (SharedPreferences + photo files need the app context).
  * The `provided` seams (sample provider, LLM client) exist for tests, exactly
@@ -143,6 +193,21 @@ class FoodViewModel
         _state.update { it.copy(selectedDayMs = ms) }
     }
 
+    /**
+     * The analytics state for [entry] right now (iOS `analytics(for:)`).
+     * [hasSamples] reads the live series through the injected provider —
+     * the same seam the insight recompute uses.
+     */
+    fun analytics(entry: FoodEntry, nowEpochSeconds: Double = System.currentTimeMillis() / 1000.0): MealAnalytics {
+        val hasSamples = (sampleProvider?.currentSamples().orEmpty()).isNotEmpty()
+        return analyticsState(
+            insight = entry.insight,
+            hasSamples = hasSamples,
+            mealDateEpochSeconds = entry.dateEpochSeconds,
+            nowEpochSeconds = nowEpochSeconds,
+        )
+    }
+
     // MARK: Sheet-facing save / estimate
 
     /**
@@ -163,6 +228,9 @@ class FoodViewModel
         var caffeineMg: Double? = null,
         var alcoholG: Double? = null,
         var citations: List<SourceCitation> = emptyList(),
+        /// Portion slider (0.1…4.0, default 1.0) — how much of the described
+        /// portion the user actually ate. (iOS `MealValues.portionMultiplier`.)
+        var portionMultiplier: Double = 1.0,
         /// When the meal was (date/time picker, default now — logging
         /// after-the-fact). null on edit = keep the stored date.
         /// (iOS `MealValues.date`.)
@@ -186,24 +254,48 @@ class FoodViewModel
     }
 
     /**
-     * Save a meal from the sheet, for a NEW entry or an EDIT of [existing].
-     * Photos in [photos] replace the entry's stored photos (old files are
-     * removed); for manual entries pass an empty list. The entry's date is
-     * preserved on edit and is "now" for new entries.
+     * Save a meal, for a NEW entry or an EDIT of [existing]. This is the ONLY
+     * save path — saving always keeps the entry analyzed
+     * (iOS `FoodLogModel.saveEntry`):
+     *
+     *  • The meal's description / serving / context / source changed → run a
+     *    fresh estimate (model endpoint) of the FULL described portion,
+     *    scaled by [MealValues.portionMultiplier] (0.1…4.0). When the
+     *    endpoint fails the estimate is EMPTY — it never invents values, so
+     *    the meal saves with blank rows instead of fabricated macros.
+     *  • Same meal, anything else changed (rows, portion) → NO LLM call. If
+     *    the portion moved, every value the entry has is rescaled (÷ old ×
+     *    new) — the slider is about the whole meal, whether the values were
+     *    estimated or typed by hand. If it didn't move, the values
+     *    round-trip verbatim, so an unchanged save is an idempotent no-op.
+     *  • The user's hand-edited nutrient rows (non-nil in [values]) always
+     *    override whatever the analysis produced, scaled by the portion.
+     *  • A meal with no data at all (no nutrient values AND no photos AND no
+     *    failed analysis) cannot be saved — it is returned unchanged and NOT
+     *    persisted.
+     *
+     * Photos in [photos] replace the entry's stored photos — but only when
+     * the photo set actually changed, so a save that doesn't touch photos
+     * rewrites nothing on disk. The meal date comes from
+     * [MealValues.dateEpochSeconds] (the picker; default now, so
+     * after-the-fact logging works); null falls back to the stored date
+     * (edit) or now (new).
      */
-    fun saveEntry(
+    @JvmOverloads
+    suspend fun saveEntry(
         existing: FoodEntry?,
         values: MealValues,
-        isEstimated: Boolean,
         photos: List<ByteArray> = emptyList(),
     ): FoodEntry {
-        // The picker supplies the meal time (default now; after-the-fact
-        // logging picks an earlier time). On edit it pre-fills with the
-        // stored date, so an untouched save keeps it.
-        val dateSec = values.dateEpochSeconds
-            ?: existing?.dateEpochSeconds
-            ?: System.currentTimeMillis() / 1000.0
         val id = existing?.id ?: newEntryId()
+        // The store is the source of truth for the CURRENT state (an
+        // `existing` copy may already carry a newer portion value, e.g.
+        // straight off the slider). All "what changed" comparisons use the
+        // stored entry.
+        val current: FoodEntry? = if (id == existing?.id) store.all().firstOrNull { it.id == id } else null
+        // The picker supplies the meal time (default now); on edit it
+        // pre-fills with the stored date, so an untouched save keeps it.
+        val dateSec = values.dateEpochSeconds ?: current?.dateEpochSeconds ?: System.currentTimeMillis() / 1000.0
 
         var entry = FoodEntry(
             id = id,
@@ -212,39 +304,208 @@ class FoodViewModel
             serving = values.serving,
             context = values.context,
             source = values.source,
-            isEstimated = isEstimated,
+            photoFileNames = current?.photoFileNames ?: (existing?.photoFileNames ?: emptyList()),
+            portionMultiplier = values.portionMultiplier,
         )
         entry = entry.copy(
-            caloriesKcal = values.caloriesKcal,
-            proteinG = values.proteinG,
-            carbsG = values.carbsG,
-            fatG = values.fatG,
-            saturatedFatG = values.saturatedFatG,
-            sodiumMg = values.sodiumMg,
-            caffeineMg = values.caffeineMg,
-            alcoholG = values.alcoholG,
-            citations = values.citations.takeIf { it.isNotEmpty() } ?: existing?.citations,
+            citations = values.citations.takeIf { it.isNotEmpty() } ?: (current?.citations ?: existing?.citations),
         )
-        // Editing a stored value clears any earlier insight — the curve is
-        // re-evaluated against the (possibly new) carb value.
-        if (existing != null) entry = entry.copy(insight = null)
 
-        // Replace stored photos: drop the old files, write the new ones under
-        // the stable `{id}_{index}.jpg` names.
-        store.deletePhotos(id)
-        val names = mutableListOf<String>()
-        if (values.source == FoodSource.PHOTO) {
-            for ((i, raw) in photos.withIndex()) {
-                val jpeg = PhotoCompressor.toJpegBytes(raw) ?: continue
-                names.add(store.savePhoto(jpeg, id, i))
-            }
+        // ---- Gate (up front): a NEW meal needs some data of its own -------
+        // (a non-empty description, a photo, or a hand-entered row). Without
+        // any of that there is nothing to analyze — and the analysis must
+        // not be allowed to manufacture a "Meal" out of nothing. (Existing
+        // entries already carry data by definition: they're in the store.)
+        if (current == null) {
+            val hasDescription = values.description.isNotBlank()
+            val hasPhotos = values.source == FoodSource.PHOTO && photos.isNotEmpty()
+            val hasRows = listOf(
+                values.caloriesKcal, values.proteinG, values.carbsG, values.fatG,
+                values.saturatedFatG, values.sodiumMg, values.caffeineMg, values.alcoholG,
+            ).any { it != null }
+            if (!hasDescription && !hasPhotos && !hasRows) return entry
         }
-        entry = entry.copy(photoFileNames = names)
 
-        if (existing != null) store.update(entry) else store.add(entry)
+        // ---- Analyze (the meal's nutrition comes from the analysis) -------
+        // 1. The meal was actually re-described (description / serving /
+        //    context / source changed vs the stored entry) → run a fresh
+        //    estimate of the FULL described portion.
+        // 2. Same meal → NO LLM call. Portion moved → rescale everything
+        //    (÷ old × new); not moved → values pass through as-is.
+        // 3. A new entry whose estimate produced nothing → the gate below
+        //    decides whether it can exist at all.
+        val descriptionChanged = current == null ||
+            current.description != entry.description ||
+            current.serving != values.serving ||
+            current.context != values.context ||
+            current.source != values.source
+        // True once the estimate branch ran and the endpoint returned a
+        // usable analysis (a failed analysis is still savable, with blank
+        // values — a meal with NO data is not).
+        var analysisSucceeded = false
+
+        if (descriptionChanged) {
+            _state.update { it.copy(isEstimating = true) }
+            var estimate: NutritionPrompt.Estimate
+            val request = NutritionPrompt.Request(
+                description = entry.description,
+                serving = values.serving,
+                context = values.context,
+                mode = if (values.source == FoodSource.PHOTO) NutritionPrompt.Mode.PHOTO else NutritionPrompt.Mode.MANUAL,
+                photoCount = if (values.source == FoodSource.PHOTO) photos.size else (current?.photoFileNames?.size ?: 0),
+            )
+            val photosToSend = if (values.source == FoodSource.PHOTO) photos else emptyList()
+            try {
+                estimate = client.estimate(request, photosToSend)
+                analysisSucceeded = !estimate.isEmpty
+            } catch (e: Exception) {
+                // The endpoint is unusable (no key, offline, unparseable):
+                // save the meal WITHOUT analyzed values — never fabricate.
+                // (isEstimating drives the Save-button spinner.)
+                estimate = NutritionPrompt.Estimate()
+                analysisSucceeded = false
+                android.util.Log.w("FoodLogModel", "FOOD: estimate failed (${e.message}) — saving the meal without analyzed values")
+            } finally {
+                _state.update { it.copy(isEstimating = false) }
+            }
+            apply(scaled(estimate, multiplier = values.portionMultiplier), entry)
+            entry = entry.copy(isEstimated = analysisSucceeded)
+            // A fresh photo estimate may rename the meal (its own
+            // description).
+            if (values.source == FoodSource.PHOTO) {
+                estimate.description?.takeIf { it.isNotEmpty() && values.description.isBlank() }
+                    ?.let { entry = entry.copy(description = it) }
+            }
+        } else if (current != null) {
+            // Same meal: no LLM call, no re-estimation. Materialize the
+            // stored values onto the entry so it is always a complete,
+            // savable record. The portion slider is about the WHOLE meal —
+            // "how much of it did you eat" — so when it moved, every value
+            // is rescaled (÷ old × new), whether estimated or typed by hand;
+            // when it didn't move, they pass through as-is.
+            val oldPortion = if (current.portionMultiplier == 0.0) 1.0 else current.portionMultiplier
+            val newPortion = if (values.portionMultiplier == 0.0) 1.0 else values.portionMultiplier
+            val s: (Double?) -> Double? = { v ->
+                if (oldPortion != newPortion) v?.let { Math.round(it / oldPortion * newPortion).toDouble() } else v
+            }
+            entry = entry.copy(
+                caloriesKcal = s(current.caloriesKcal),
+                proteinG = s(current.proteinG),
+                carbsG = s(current.carbsG),
+                fatG = s(current.fatG),
+                saturatedFatG = s(current.saturatedFatG),
+                sodiumMg = s(current.sodiumMg),
+                caffeineMg = s(current.caffeineMg),
+                alcoholG = s(current.alcoholG),
+                isEstimated = current.isEstimated,
+            )
+        }
+
+        // ---- Honor the user's hand-edited rows ---------------------------
+        // The sheet's rows are values of the FULL described portion (its
+        // prefill divides the stored value by the portion). Like the
+        // estimate, a hand-entered row is scaled by the portion to become
+        // what the user actually ate.
+        val p = if (values.portionMultiplier == 0.0) 1.0 else values.portionMultiplier
+        entry = entry.copy(
+            caloriesKcal = values.caloriesKcal?.let { Math.round(it * p).toDouble() } ?: entry.caloriesKcal,
+            proteinG = values.proteinG?.let { Math.round(it * p).toDouble() } ?: entry.proteinG,
+            carbsG = values.carbsG?.let { Math.round(it * p).toDouble() } ?: entry.carbsG,
+            fatG = values.fatG?.let { Math.round(it * p).toDouble() } ?: entry.fatG,
+            saturatedFatG = values.saturatedFatG?.let { Math.round(it * p).toDouble() } ?: entry.saturatedFatG,
+            sodiumMg = values.sodiumMg?.let { Math.round(it * p).toDouble() } ?: entry.sodiumMg,
+            caffeineMg = values.caffeineMg?.let { Math.round(it * p).toDouble() } ?: entry.caffeineMg,
+            alcoholG = values.alcoholG?.let { Math.round(it * p).toDouble() } ?: entry.alcoholG,
+        )
+
+        // ---- Gate: no data at all -> not savable --------------------------
+        // (The sheet blocks the button too; this is the model-level
+        // guarantee. Nothing is persisted in that case.)
+        val hasNutrition = listOf(
+            entry.caloriesKcal, entry.proteinG, entry.carbsG, entry.fatG,
+            entry.saturatedFatG, entry.sodiumMg, entry.caffeineMg, entry.alcoholG,
+        ).any { it != null }
+        val hasPhotos = values.source == FoodSource.PHOTO && photos.isNotEmpty()
+        // A meal whose analysis FAILED (the endpoint was unusable) carries
+        // no nutrient values by design — it is still savable, with the blank
+        // rows clearly flagged, so the log keeps WHAT was eaten.
+        val analysisFailed = descriptionChanged && !analysisSucceeded
+        if (!hasNutrition && !hasPhotos && !analysisFailed) return entry
+
+        // ---- Photos --------------------------------------------------------
+        // The photo set is rewritten ONLY when it actually changed
+        // (different count or any file's bytes differ). Saving a meal whose
+        // photos are untouched must not re-encode its files on disk.
+        val storedNames = current?.photoFileNames ?: emptyList()
+        val storedData: List<ByteArray> =
+            if (values.source == FoodSource.PHOTO) store.photoBytes(current ?: entry) else emptyList()
+        val photosUnchanged = if (values.source != FoodSource.PHOTO) {
+            storedNames.isEmpty() && photos.isEmpty()
+        } else {
+            photos.size == storedData.size &&
+                photos.zip(storedData).all { (a, b) -> a.contentEquals(b) }
+        }
+        if (photosUnchanged) {
+            entry = entry.copy(photoFileNames = storedNames)
+        } else {
+            store.deletePhotos(id)
+            val names = mutableListOf<String>()
+            if (values.source == FoodSource.PHOTO) {
+                for ((i, raw) in photos.withIndex()) {
+                    val jpeg = PhotoCompressor.toJpegBytes(raw) ?: continue
+                    names.add(store.savePhoto(jpeg, id, i))
+                }
+            }
+            entry = entry.copy(photoFileNames = names)
+        }
+
+        // Editing the meal re-arms its insight: the curve is re-evaluated
+        // against the (possibly new) carb value once the window allows.
+        if (current != null && current.insight != null) {
+            entry = entry.copy(insight = null)
+        }
+
+        if (current != null) store.update(entry) else store.add(entry)
         refresh()
         recomputeInsights(force = true)
         return entry
+    }
+
+    /** Scale every non-nil estimate value by [multiplier] (portion adjust). (iOS `scaled(_:by:)`.) */
+    private fun scaled(e: NutritionPrompt.Estimate, multiplier: Double): NutritionPrompt.Estimate {
+        val s: (Double?) -> Double? = { v -> v?.let { Math.round(it * multiplier).toDouble() } }
+        return e.copy(
+            caloriesKcal = s(e.caloriesKcal),
+            proteinG = s(e.proteinG),
+            carbsG = s(e.carbsG),
+            fatG = s(e.fatG),
+            saturatedFatG = s(e.saturatedFatG),
+            sodiumMg = s(e.sodiumMg),
+            caffeineMg = s(e.caffeineMg),
+            alcoholG = s(e.alcoholG),
+        )
+    }
+
+    /**
+     * Update an existing entry (detail view: portion slider or edited rows).
+     * Reuses [saveEntry] so analysis + insight re-arm are identical to the
+     * sheet's save path. (iOS `updateEntry`.)
+     */
+    suspend fun updateEntry(updated: FoodEntry): FoodEntry {
+        val photos = store.photoBytes(updated)
+        val values = MealValues(
+            description = updated.description,
+            serving = updated.serving,
+            context = updated.context,
+            source = updated.source,
+            // nil = "no hand edit here" → the (re)estimate / stored values win.
+            caloriesKcal = null, proteinG = null, carbsG = null, fatG = null,
+            saturatedFatG = null, sodiumMg = null, caffeineMg = null, alcoholG = null,
+            citations = updated.citations.orEmpty(),
+            portionMultiplier = updated.portionMultiplier,
+            dateEpochSeconds = updated.dateEpochSeconds,
+        )
+        return saveEntry(existing = updated, values = values, photos = photos)
     }
 
     /**

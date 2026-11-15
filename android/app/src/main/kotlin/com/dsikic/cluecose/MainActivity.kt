@@ -29,6 +29,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.dp
+import com.dsikic.cluecose.food.FoodDetailSheet
 import com.dsikic.cluecose.food.FoodLogScreen
 import com.dsikic.cluecose.food.FoodLogSheet
 import com.dsikic.cluecose.food.FoodViewModel
@@ -167,6 +168,8 @@ private fun CluecoseRoot(viewModel: GlucoseViewModel, foodViewModel: FoodViewMod
     var showSettings by remember { mutableStateOf(false) }
     var showFoodSheet by remember { mutableStateOf(false) }
     var foodSheetEntry by remember { mutableStateOf<com.dsikic.cluecose.core.food.FoodEntry?>(null) }
+    // The per-meal detail sheet (iOS FoodDetailView), keyed by entry id.
+    var foodDetailEntryId by remember { mutableStateOf<String?>(null) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Backdrop(modifier = Modifier.fillMaxSize())
@@ -201,6 +204,9 @@ private fun CluecoseRoot(viewModel: GlucoseViewModel, foodViewModel: FoodViewMod
                     },
                     onReanalyze = { entry ->
                         foodViewModel.viewModelScope.launch { foodViewModel.reanalyze(entry) }
+                    },
+                    onDetail = { entry ->
+                        foodDetailEntryId = entry.id
                     },
                     modifier = Modifier.padding(top = 18.dp),
                 )
@@ -260,6 +266,15 @@ private fun CluecoseRoot(viewModel: GlucoseViewModel, foodViewModel: FoodViewMod
                     showFoodSheet = false
                     foodSheetEntry = null
                 },
+            )
+        }
+
+        foodDetailEntryId?.let { id ->
+            FoodDetailSheet(
+                viewModel = foodViewModel,
+                initialEntryId = id,
+                unit = state.unit,
+                onDismiss = { foodDetailEntryId = null },
             )
         }
     }

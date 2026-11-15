@@ -36,8 +36,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -82,6 +84,7 @@ fun FoodLogScreen(
     onAdd: () -> Unit,
     onEdit: (FoodEntry) -> Unit,
     onReanalyze: (FoodEntry) -> Unit = {},
+    onDetail: (FoodEntry) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var query by remember { mutableStateOf("") }
@@ -139,6 +142,8 @@ fun FoodLogScreen(
                             onClick = { onEdit(entry) },
                             onReanalyze = { onReanalyze(entry) },
                             onRemovePhoto = { viewModel.deletePhoto(entry, it) },
+                            onDetail = { onDetail(entry) },
+                            analytics = viewModel.analytics(entry),
                         )
                     }
                 }
@@ -284,6 +289,8 @@ private fun EntryRow(
     onClick: () -> Unit,
     onReanalyze: () -> Unit,
     onRemovePhoto: (Int) -> Unit,
+    onDetail: () -> Unit,
+    analytics: MealAnalytics,
 ) {
     val painter = photoPath?.let { remember(it) { filePainter(it) } }
     Column(
@@ -322,15 +329,57 @@ private fun EntryRow(
                 }
                 NutrientLine(entry)
             }
-            Text(
-                text = timeLabel(entry.dateEpochSeconds),
-                fontSize = 10.sp,
-                color = CluecoseColors.white(0.4f),
-            )
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                // The details arrow — top-right of the card entry (iOS
+                // `chevron.right` Button → onDetail).
+                Icon(
+                    imageVector = Icons.Filled.ChevronRight,
+                    contentDescription = "Details",
+                    tint = CluecoseColors.white(0.45f),
+                    modifier = Modifier
+                        .size(16.dp)
+                        .clickable(onClick = onDetail),
+                )
+                Text(
+                    text = timeLabel(entry.dateEpochSeconds),
+                    fontSize = 10.sp,
+                    color = CluecoseColors.white(0.4f),
+                )
+            }
         }
 
         if (entry.insight != null) {
-            InsightCallout(entry.insight!!, onReanalyze = onReanalyze)
+            // The insight callout is itself tappable → detail view (iOS).
+            InsightCallout(entry.insight!!, onReanalyze = onDetail)
+        } else if (analytics is MealAnalytics.Pending) {
+            // The small "analyzing" pill shown while the post-meal window is
+            // still forming: what's happening + when the result lands.
+            // Tappable → detail. (iOS `pendingPill`.)
+            val a = analytics
+            val readyLabel = SimpleDateFormat("h:mm a", Locale.US)
+                .format(Date(a.readyAtMs))
+            Row(
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(CluecoseColors.GlowLow.copy(alpha = 0.10f), RoundedCornerShape(12.dp))
+                    .padding(10.dp)
+                    .clickable(onClick = onDetail),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.HourglassEmpty,
+                    contentDescription = null,
+                    tint = CluecoseColors.GlowLow,
+                    modifier = Modifier.size(12.dp),
+                )
+                Text(
+                    text = "Blood-sugar analysis in ~${a.remainingMin} min (done $readyLabel)",
+                    fontSize = 10.sp,
+                    color = CluecoseColors.white(0.75f),
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
     }
 }

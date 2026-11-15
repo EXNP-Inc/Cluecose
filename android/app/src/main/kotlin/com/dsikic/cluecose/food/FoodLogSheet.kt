@@ -6,14 +6,17 @@
 //  control switches between Type (typed description) and Photo (capture, or
 //  pick up to 5 from the gallery).
 //
-//  "Estimate" / "Reanalyze" sends the description (and photos, in photo mode)
-//  to the configured model endpoint and fills the eight editable nutrient rows
-//  plus the model's own description and any citations (each a tappable link).
-//  If the endpoint fails, an "enter values by hand" fallback banner shows and
-//  every row stays editable — manual entry always works.
+//  "Estimate" / "Reanalyze" (optional convenience) sends the description (and
+//  photos, in photo mode) to the configured model endpoint and pre-fills the
+//  eight editable nutrient rows plus the model's own description and any
+//  citations (each a tappable link). Saving ALWAYS analyzes: when the meal's
+//  description changed, the model runs on Save; when the endpoint fails the
+//  meal saves with blank rows and the sheet stays open so the values can be
+//  entered by hand — manual entry always works.
 //
-//  Edit mode prefills from the existing entry; deleting an entry removes it;
-//  saving an edit flips isEstimated=false. Mirrors iOS `FoodLogSheet`.
+//  Edit mode prefills from the existing entry (rows show the FULL described
+//  portion's worth: stored ÷ portion); deleting an entry removes it.
+//  Mirrors iOS `FoodLogSheet`.
 //
 
 package com.dsikic.cluecose.food
@@ -46,6 +49,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.DatePickerState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
@@ -110,21 +114,42 @@ fun FoodLogSheet(
     var showDatePicker by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
 
-    // Nutrient rows (editable; prefilled from an estimate or an edit).
-    var kcalText by remember { mutableStateOf(number(existing?.caloriesKcal)) }
-    var proteinText by remember { mutableStateOf(number(existing?.proteinG)) }
-    var carbsText by remember { mutableStateOf(number(existing?.carbsG)) }
-    var fatText by remember { mutableStateOf(number(existing?.fatG)) }
-    var satFatText by remember { mutableStateOf(number(existing?.saturatedFatG)) }
-    var sodiumText by remember { mutableStateOf(number(existing?.sodiumMg)) }
-    var caffeineText by remember { mutableStateOf(number(existing?.caffeineMg)) }
-    var alcoholText by remember { mutableStateOf(number(existing?.alcoholG)) }
+    // Portion slider (0.1…4.0, default 1.0) — how much of the described
+    // portion was eaten. (iOS `portion`.) The rows below are the FULL
+    // portion's worth (stored ÷ portion); the slider carries the portion, and
+    // the stored values are base × portion.
+    val initPortion = (existing?.portionMultiplier ?: 1.0).let { if (it == 0.0) 1.0 else it }
+    var portion by remember { mutableStateOf(initPortion) }
+    // Nutrient rows (editable). Prefilled with the FULL described portion's
+    // worth: stored ÷ portion, so the slider is what rescales them.
+    val initKcal = number(existing?.caloriesKcal?.let { it / initPortion })
+    val initProtein = number(existing?.proteinG?.let { it / initPortion })
+    val initCarbs = number(existing?.carbsG?.let { it / initPortion })
+    val initFat = number(existing?.fatG?.let { it / initPortion })
+    val initSatFat = number(existing?.saturatedFatG?.let { it / initPortion })
+    val initSodium = number(existing?.sodiumMg?.let { it / initPortion })
+    val initCaffeine = number(existing?.caffeineMg?.let { it / initPortion })
+    val initAlcohol = number(existing?.alcoholG?.let { it / initPortion })
+    var kcalText by remember { mutableStateOf(initKcal) }
+    var proteinText by remember { mutableStateOf(initProtein) }
+    var carbsText by remember { mutableStateOf(initCarbs) }
+    var fatText by remember { mutableStateOf(initFat) }
+    var satFatText by remember { mutableStateOf(initSatFat) }
+    var sodiumText by remember { mutableStateOf(initSodium) }
+    var caffeineText by remember { mutableStateOf(initCaffeine) }
+    var alcoholText by remember { mutableStateOf(initAlcohol) }
+    // What "untouched" looks like per row (so a row left at its prefill is NOT
+    // a hand-edit — the analyzed/stored value owns it). (iOS `rowOrigins`.)
+    var rowOrigins by remember {
+        mutableStateOf(
+            listOf(initKcal, initProtein, initCarbs, initFat, initSatFat, initSodium, initCaffeine, initAlcohol),
+        )
+    }
+    var isSaving by remember { mutableStateOf(false) }
 
     // Estimate results + state.
     var modelDescription by remember { mutableStateOf("") }
     var citations by remember { mutableStateOf(existing?.citations.orEmpty()) }
-    var hasEstimated by remember { mutableStateOf(false) }
-    var showFallback by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     // Photos (photo mode): existing stored files + new picks/captures.
@@ -160,6 +185,61 @@ fun FoodLogSheet(
     // `runEstimate` below (it holds the row state). We track it only for the
     // spinner.
     val configEnabled = FoodLLMConfig.load(context).isEnabled
+
+    // MARK: Save
+
+    /// Save always analyzes: hand the current fields to the model, which runs
+    /// the estimate (when the meal's description changed), scales by the
+    /// portion, keeps the user's explicit rows, and re-arms the blood-sugar
+    /// insight. (iOS `FoodLogSheet.save`.)
+    ///
+    /// Returns null when the meal was saved but the analysis came back blank
+    /// — the sheet stays open so the user can fill the rows in by hand right
+    /// now (a re-save with the description unchanged won't re-run the
+    /// analysis, so the hand-entered values stick).
+    suspend fun saveNow(): FoodEntry? {
+        val values = FoodViewModel.MealValues(
+            description = descriptionText,
+            serving = servingText.takeIf { it.isNotBlank() },
+            context = contextText.takeIf { it.isNotBlank() },
+            source = if (modeIsPhoto) FoodSource.PHOTO else FoodSource.MANUAL,
+            // nil = "user didn't touch this row" → the analyzed value stays.
+            caloriesKcal = rowValue(kcalText, origin = rowOrigins[0]),
+            proteinG = rowValue(proteinText, origin = rowOrigins[1]),
+            carbsG = rowValue(carbsText, origin = rowOrigins[2]),
+            fatG = rowValue(fatText, origin = rowOrigins[3]),
+            saturatedFatG = rowValue(satFatText, origin = rowOrigins[4]),
+            sodiumMg = rowValue(sodiumText, origin = rowOrigins[5]),
+            caffeineMg = rowValue(caffeineText, origin = rowOrigins[6]),
+            alcoholG = rowValue(alcoholText, origin = rowOrigins[7]),
+            citations = citations,
+            portionMultiplier = portion,
+            dateEpochSeconds = mealDateMs / 1000.0,
+        )
+        val photosToSend = if (modeIsPhoto) photos.mapNotNull { it.toJpegBytes(context) } else emptyList()
+        val saved = viewModel.saveEntry(existing = existing, values = values, photos = photosToSend)
+        // Surface the model's own description for photo entries it named.
+        if (saved.description != descriptionText) {
+            modelDescription = saved.description
+            if (descriptionText.isEmpty()) descriptionText = saved.description
+        }
+        // The analysis failed (endpoint unusable): the meal was saved with
+        // BLANK values. Keep the sheet open so the user can fill the rows in
+        // by hand right now.
+        val noValues = listOf(
+            saved.caloriesKcal, saved.proteinG, saved.carbsG, saved.fatG,
+            saved.saturatedFatG, saved.sodiumMg, saved.caffeineMg, saved.alcoholG,
+        ).all { it == null }
+        if (noValues && photosToSend.isNotEmpty()) {
+            errorMessage = "Saved — but the model couldn't analyze this photo. Enter the values below to fill it in."
+            return null
+        }
+        if (noValues) {
+            errorMessage = "Saved — but the model endpoint is unavailable, so no nutrition was analyzed. Enter the values below, or tap Save again later to retry."
+            return null
+        }
+        return saved
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -291,21 +371,20 @@ fun FoodLogSheet(
                     }
                 }
 
-                // Estimate section.
+                // Portion: "How much of this did you eat?" (iOS portionSection).
+                PortionSection(portion) { portion = it }
+
+                // Estimate (optional pre-analysis). Saving always analyzes
+                // (the model runs on Save when the meal's description
+                // changed) — this just pre-fills the rows early. (iOS has no
+                // button; it is an Android convenience, kept for parity of
+                // OUTCOME.)
                 SectionLabel("Estimate")
-                if (showFallback) {
-                    Text(
-                        text = "Enter values by hand — the estimate failed, but you can still log this meal.",
-                        fontSize = 12.sp,
-                        color = CluecoseColors.GlowHigh,
-                    )
-                }
                 if (isEstimating) {
                     Text(text = "Estimating…", fontSize = 12.sp, color = CluecoseColors.white(0.6f))
                 }
-                val buttonLabel = if (existing == null && !hasEstimated) "Estimate" else "Reanalyze"
                 Text(
-                    text = buttonLabel,
+                    text = if (existing == null) "Estimate" else "Reanalyze",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = CluecoseColors.Action,
@@ -324,6 +403,9 @@ fun FoodLogSheet(
                                 val photosToSend = if (modeIsPhoto) photos.mapNotNull { it.toJpegBytes(context) } else emptyList()
                                 try {
                                     val est = viewModel.runEstimate(request, photosToSend)
+                                    // The rows are the FULL described portion's
+                                    // worth (the portion slider rescales on
+                                    // save), so the estimate goes in as-is.
                                     kcalText = number(est.caloriesKcal)
                                     proteinText = number(est.proteinG)
                                     carbsText = number(est.carbsG)
@@ -337,11 +419,13 @@ fun FoodLogSheet(
                                         if (descriptionText.isEmpty()) descriptionText = it
                                     }
                                     citations = est.citations
-                                    hasEstimated = true
-                                    showFallback = false
+                                    // The rows now show the estimate, not a
+                                    // hand edit — refresh "untouched" so an
+                                    // unchanged save lets the (re)analysis on
+                                    // Save own them, exactly like iOS.
+                                    rowOrigins = listOf(kcalText, proteinText, carbsText, fatText, satFatText, sodiumText, caffeineText, alcoholText)
                                 } catch (e: Exception) {
                                     errorMessage = e.message
-                                    showFallback = true
                                 }
                             }
                         }
@@ -355,8 +439,9 @@ fun FoodLogSheet(
                     )
                 }
 
-                // Nutrition (editable) rows.
-                SectionLabel("Nutrition (editable)")
+                // Nutrition (editable) rows — values of the FULL described
+                // portion; the portion slider rescales what's stored.
+                SectionLabel("Nutrition (editable — your values win)")
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     NutrientField("Calories", "kcal", kcalText) { kcalText = it }
                     NutrientField("Protein", "g", proteinText) { proteinText = it }
@@ -432,7 +517,7 @@ fun FoodLogSheet(
                 }
                 val canSave = modeIsPhoto || descriptionText.isNotBlank()
                 Text(
-                    text = "Save",
+                    text = if (isSaving) "Saving…" else "Save",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = if (canSave) Color(0xFF04150C) else CluecoseColors.white(0.4f),
@@ -440,27 +525,14 @@ fun FoodLogSheet(
                     modifier = Modifier
                         .weight(1f)
                         .background(if (canSave) CluecoseColors.Action else CluecoseColors.white(0.15f), RoundedCornerShape(10.dp))
-                        .clickable(enabled = canSave) {
-                            val values = FoodViewModel.MealValues(
-                                description = descriptionText,
-                                serving = servingText.takeIf { it.isNotBlank() },
-                                context = contextText.takeIf { it.isNotBlank() },
-                                source = if (modeIsPhoto) FoodSource.PHOTO else FoodSource.MANUAL,
-                                caloriesKcal = parse(kcalText),
-                                proteinG = parse(proteinText),
-                                carbsG = parse(carbsText),
-                                fatG = parse(fatText),
-                                saturatedFatG = parse(satFatText),
-                                sodiumMg = parse(sodiumText),
-                                caffeineMg = parse(caffeineText),
-                                alcoholG = parse(alcoholText),
-                                citations = citations,
-                                dateEpochSeconds = mealDateMs / 1000.0,
-                            )
-                            val isEstimated = if (existing != null) false else hasEstimated
-                            val photosToSave = if (modeIsPhoto) photos.mapNotNull { it.toJpegBytes(context) } else emptyList()
-                            viewModel.saveEntry(existing, values, isEstimated, photosToSave)
-                            onDismiss()
+                        .clickable(enabled = canSave && !isSaving) {
+                            errorMessage = null
+                            isSaving = true
+                            scope.launch {
+                                val saved = saveNow()
+                                isSaving = false
+                                if (saved != null) onDismiss()
+                            }
                         }
                         .padding(vertical = 10.dp),
                 )
@@ -562,6 +634,44 @@ fun FoodLogSheet(
 
 private val MEAL_DATE_FORMAT: DateTimeFormatter =
     DateTimeFormatter.ofPattern("EEE, MMM d · h:mm a")
+
+/**
+ * "How much of this did you eat?" — 0.1× to 4.0× in 0.1 steps, default 1.0.
+ * The estimate describes the full photographed/typed portion; the stored
+ * values are the estimate × the multiplier. (iOS `portionSection`.)
+ */
+@Composable
+private fun PortionSection(portion: Double, onPortionChange: (Double) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "How much did you eat?",
+                fontSize = 14.sp,
+                color = Color.White,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = String.format(java.util.Locale.US, "%.1f×", portion),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White,
+            )
+        }
+        // 0.1…4.0 in 0.1 steps (iOS `Slider(value:in:step:)` → 38 intervals).
+        Slider(
+            value = portion.toFloat(),
+            onValueChange = { onPortionChange(it.toDouble()) },
+            valueRange = 0.1f..4.0f,
+            steps = 38,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(text = "¼", fontSize = 10.sp, color = CluecoseColors.white(0.4f))
+            Text(text = "full portion", fontSize = 10.sp, color = CluecoseColors.white(0.4f))
+            Text(text = "4×", fontSize = 10.sp, color = CluecoseColors.white(0.4f))
+        }
+    }
+}
 
 @Composable
 private fun ModeSegment(isPhoto: Boolean, onSelect: (Boolean) -> Unit) {
@@ -668,6 +778,13 @@ private fun PhotoThumb(uri: Uri, onRemove: () -> Unit) {
 private fun number(v: Double?): String = v?.let { String.format("%.1f", it) } ?: ""
 
 private fun parse(text: String): Double? = text.trim().toDoubleOrNull()
+
+/// The parsed value of a nutrient row — or nil when the user left it
+/// exactly as pre-filled (so the saved/analyzed value owns it). A row that
+/// was pre-filled empty and is now filled is a hand edit; a pre-filled row
+/// set back to its original text is not. (iOS `rowValue`.)
+private fun rowValue(text: String, origin: String): Double? =
+    if (text.trim() == origin) null else parse(text)
 
 /**
  * Load a picked/captured image URI as a downscale JPEG byte array (null when
