@@ -298,6 +298,10 @@ final class FoodLogModel: ObservableObject {
             || current?.serving != values.serving
             || current?.context != values.context
             || current?.source != values.source
+        // True once the estimate branch has run and the endpoint returned a
+        // usable analysis (see the gate below: a failed analysis is still
+        // savable, with blank values — a meal with NO data is not).
+        var analysisSucceeded = false
 
         if descriptionChanged {
             let request = NutritionPrompt.Request(
@@ -310,22 +314,26 @@ final class FoodLogModel: ObservableObject {
                     : (current?.photoFileNames.count ?? 0)
             )
             let photosToSend = values.source == .photo ? photos : []
-            // Model first; local keyword fallback when the endpoint is down
-            // (the fallback never throws, so a meal with a description can
-            // always be analyzed offline). (isEstimating drives the
-            // Save-button spinner while in flight.)
+            // Model first. When the endpoint is unusable (no key, invalid or
+            // out-of-credits key, offline, unparseable answer) the fallback
+            // returns an EMPTY estimate — it never invents values, so the meal
+            // saves with blank rows instead of fabricated macros. (isEstimating
+            // drives the Save-button spinner while in flight.)
             isEstimating = true
             let estimate: NutritionPrompt.Estimate
             do {
                 estimate = try await llm.estimate(request, photos: photosToSend)
+                analysisSucceeded = !estimate.isEmpty
             } catch {
                 estimate = llm.fallbackEstimate(description: request.description,
                                                 serving: request.serving,
                                                 context: request.context)
+                analysisSucceeded = false
+                clog("FOOD: estimate failed (\(error.localizedDescription)) — saving the meal without analyzed values")
             }
             isEstimating = false
             apply(scaled(estimate, by: values.portionMultiplier), to: &entry)
-            entry.isEstimated = true
+            entry.isEstimated = analysisSucceeded
             // A fresh photo estimate may rename the meal (its own
             // description).
             if values.source == .photo, let d = estimate.description,
@@ -382,7 +390,13 @@ final class FoodLogModel: ObservableObject {
                             entry.caffeineMg, entry.alcoholG]
             .contains { $0 != nil }
         let hasPhotos = values.source == .photo && !photos.isEmpty
-        guard hasNutrition || hasPhotos else { return entry }
+        // A meal whose analysis FAILED (the endpoint was unusable) carries no
+        // nutrient values by design — it is still savable, with the blank rows
+        // clearly flagged, so the log keeps WHAT was eaten. A meal with no
+        // data of any kind (no values, no photos, no real description) is
+        // refused: there is nothing to log.
+        let analysisFailed = descriptionChanged && !analysisSucceeded
+        guard hasNutrition || hasPhotos || analysisFailed else { return entry }
 
         // ---- Photos --------------------------------------------------------
         // The photo set is rewritten ONLY when it actually changed (different
@@ -476,6 +490,28 @@ final class FoodLogModel: ObservableObject {
     }
 
     // MARK: Remove
+
+    /// The descriptions demo mode seeds (see `DemoData.foodEntries`). They are
+    /// the ONLY provenance tag the seeded meals carry, so that is how they are
+    /// recognized — and removed — when demo mode is switched off. A real meal
+    /// typed by the user with an identical description is accepted collateral
+    /// (the user can re-log it; demo mode exists precisely so the sample
+    /// entries stay recognizable).
+    static let demoMealDescriptions: Set<String> = Set(
+        DemoData.foodEntries(now: Date()).map(\.description)
+    )
+
+    /// Remove the demo-seeded meals (when demo mode is switched off). The
+    /// user's own entries are never touched.
+    func removeDemoMeals() {
+        let doomed = store.all().filter { Self.demoMealDescriptions.contains($0.description) }
+        guard !doomed.isEmpty else { return }
+        for entry in doomed {
+            store.delete(id: entry.id)
+        }
+        clog("FOOD: removed \(doomed.count) demo meal(s) on demo-mode off")
+        refresh()
+    }
 
     /// Remove an entry and its photos.
     func delete(_ entry: FoodEntry) {

@@ -49,6 +49,22 @@ final class StubEstimator: FoodEstimating, @unchecked Sendable {
     }
 }
 
+/// Estimator whose endpoint is UNUSABLE (every call throws) — like a build
+/// whose key is invalid/out-of-credits, or an offline device. Its fallback
+/// must return an EMPTY estimate (the real client never fabricates values).
+final class FailingEstimator: FoodEstimating, @unchecked Sendable {
+    func estimate(_ request: NutritionPrompt.Request,
+                  photos: [Data]) async throws -> NutritionPrompt.Estimate {
+        throw FoodLLMError.noAPIKey
+    }
+
+    func fallbackEstimate(description: String,
+                          serving: String?,
+                          context: String?) -> NutritionPrompt.Estimate {
+        NutritionPrompt.Estimate(description: description.isEmpty ? nil : description)
+    }
+}
+
 // MARK: - Test harness
 
 @MainActor
@@ -119,6 +135,39 @@ final class FoodLogModelTests: XCTestCase {
         XCTAssertEqual(model.entries.count, 1)
         XCTAssertEqual(saved.photoFileNames.count, 1)
         XCTAssertEqual(stub.calls, 1)
+    }
+
+    // MARK: Failed analysis (endpoint unusable — invalid/out-of-credits key, offline)
+
+    /// A described meal whose analysis FAILED must still be saved — with NO
+    /// nutrient values and isEstimated=false — never with fabricated macros.
+    /// (Regression: "2 tsp Metamucil" was once logged as ~475 kcal by the old
+    /// keyword-guess fallback.)
+    @MainActor
+    func testFailedAnalysisSavesBlankNotFabricated() async {
+        let store = FoodLogStore(defaults: defaults)
+        let m = FoodLogModel(store: store, llm: FailingEstimator())
+        let saved = await m.saveEntry(
+            existing: nil,
+            values: FoodLogModel.MealValues(description: "2 teaspoons of metamucil with stevia and zero sugar"),
+            photos: [])
+        XCTAssertEqual(m.entries.count, 1, "a described meal must be saved even when the analysis fails")
+        XCTAssertEqual(saved.caloriesKcal, nil, "no fabricated calories")
+        XCTAssertEqual(saved.carbsG, nil, "no fabricated carbs")
+        XCTAssertEqual(saved.proteinG, nil, "no fabricated protein")
+        XCTAssertEqual(saved.fatG, nil, "no fabricated fat")
+        XCTAssertFalse(saved.isEstimated, "a failed analysis is not an estimate")
+        XCTAssertEqual(saved.description, "2 teaspoons of metamucil with stevia and zero sugar")
+    }
+
+    /// A meal with NO data at all still refuses to save when the analysis
+    /// fails (the gate: nothing to log).
+    @MainActor
+    func testFailedAnalysisStillRefusesEmptyMeal() async {
+        let store = FoodLogStore(defaults: defaults)
+        let m = FoodLogModel(store: store, llm: FailingEstimator())
+        _ = await m.saveEntry(existing: nil, values: FoodLogModel.MealValues(description: ""), photos: [])
+        XCTAssertEqual(m.entries.count, 0, "an empty meal is still unsavable")
     }
 
     // MARK: Portion

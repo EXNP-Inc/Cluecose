@@ -150,6 +150,52 @@ final class HealthKitSync: ObservableObject {
         }
     }
 
+    /// Delete the glucose samples THIS app wrote over the last 48 h. Used when
+    /// demo mode switches off: while demo mode was on, the synthetic series
+    /// (and any real samples before it) may have been pushed to Health, and
+    /// `readRecentSamples` would keep pulling them back in as "external" data
+    /// forever. Only our own source's rows are touched — samples from other
+    /// apps (manual entries, other CGMs) are never deleted (HealthKit only
+    /// allows deleting what you wrote, and this filters to our source anyway).
+    /// A paired real sensor re-streams and re-writes its data within minutes.
+    /// Awaitable so the caller can re-sync the external read-back AFTER the
+    /// purge finishes (no stale read-back race).
+    func purgeDemoGlucose() async {
+        guard available, authorized else { return }
+        let start = Date().addingTimeInterval(-48 * 3600)
+        let timePredicate = HKQuery.predicateForSamples(withStart: start, end: nil, options: .strictStartDate)
+        let predicate = HKSamplePredicate.quantitySample(
+            type: sampleType, predicate: timePredicate
+        )
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [predicate],
+            sortDescriptors: [SortDescriptor(\HKQuantitySample.startDate, order: .forward)],
+            limit: nil
+        )
+        let results: [HKQuantitySample]
+        do {
+            results = try await descriptor.result(for: healthStore)
+        } catch {
+            clog("HK purge: query failed: \(error)")
+            return
+        }
+        // Delete only rows THIS app wrote (bundle match). HealthKit also
+        // enforces it — deleting another app's sample throws and is skipped.
+        let ourBundle = Bundle.main.bundleIdentifier
+        var deleted = 0
+        for sample in results where sample.sourceRevision.source.bundleIdentifier == ourBundle {
+            do {
+                try await healthStore.delete(sample)
+                deleted += 1
+            } catch {
+                clog("HK purge: delete failed (\(sample.startDate)): \(error)")
+            }
+        }
+        if deleted > 0 {
+            clog("HK purge: removed \(deleted) Cluecose sample(s) from the last 48 h (demo-mode cleanup)")
+        }
+    }
+
     // MARK: Sleep (read-only, for the nutrition-sleep association)
 
     /// The sleep-analysis type, read-only.

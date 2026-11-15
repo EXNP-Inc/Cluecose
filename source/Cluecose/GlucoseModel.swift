@@ -116,6 +116,12 @@ final class GlucoseModel: ObservableObject {
     /// One re-injection of demo data per 60 s (keeps the series "live" while
     /// the toggle is on).
     private var demoRefreshTask: Task<Void, Never>?
+    /// True while the demo-mode-off HealthKit purge is in flight — the 60 s
+    /// external refresh must not pull the not-yet-deleted demo rows back in.
+    private var demoPurgePending = false
+    /// Set once after the one-time cleanup of demo-mode rows that OLDER builds
+    /// (which wrote them while demo mode was on) left in the Health app.
+    private static let demoHKPurgedKey = "cluecose.demo.hkPurged"
 
     /// Blood-glucose readings older than this are considered stale.
     private let freshWindow: TimeInterval = 25 * 60
@@ -185,10 +191,16 @@ final class GlucoseModel: ObservableObject {
         libreViewAccountID = UserDefaults.standard.string(forKey: Self.accountIDKey) ?? ""
         healthKitEnabled = UserDefaults.standard.object(forKey: HealthKitSync.enabledKey) as? Bool ?? true
         liveActivityEnabled = UserDefaults.standard.bool(forKey: LiveActivityManager.enabledKey)
-        // Demo mode defaults ON: the simulators have no NFC, so a fresh launch
-        // should immediately show a working app with data, not the pair card.
-        // An explicit "off" (stored false) is respected on subsequent launches.
+        // Demo mode defaults ON on the SIMULATOR (it has no NFC, so a fresh
+        // launch should immediately show a working app with data, not the
+        // pair card) and OFF on a physical device (a phone that can pair a
+        // real sensor must never start on fake data). An explicit choice
+        // (stored true/false) always wins on subsequent launches.
+        #if targetEnvironment(simulator)
         demoMode = (UserDefaults.standard.object(forKey: Self.demoModeKey) as? Bool) ?? true
+        #else
+        demoMode = (UserDefaults.standard.object(forKey: Self.demoModeKey) as? Bool) ?? false
+        #endif
 
         directReader = LibreDirectReader()
         // Create the food-log brain (it holds a weak reference back to us).
@@ -261,6 +273,19 @@ final class GlucoseModel: ObservableObject {
             await self?.foodLog.refreshSleepInsights()
         }
         WatchPusher.shared.activate()
+        // One-time migration: older builds wrote the synthetic demo series to
+        // Health while demo mode was on (the read-back then kept pulling it
+        // back in forever). This build never writes demo data — but rows
+        // already in Health need a single cleanup, so on the first launch of
+        // this build, if demo mode is OFF, purge our own 48 h of Health rows
+        // and re-sync the read-back. (While demo mode is ON, those rows are
+        // expected and the cleanup runs when it is switched off.)
+        if !demoMode,
+           !UserDefaults.standard.bool(forKey: Self.demoHKPurgedKey) {
+            UserDefaults.standard.set(true, forKey: Self.demoHKPurgedKey)
+            clog("DEMO: one-time cleanup — purging demo-mode rows older builds left in Health")
+            scheduleDemoHKPurge()
+        }
         // Chain the background link-keeper so a locked, suspended app still
         // re-acquires the sensor within the system's refresh cadence.
         scheduleLinkKeeper()
@@ -299,6 +324,9 @@ final class GlucoseModel: ObservableObject {
                 while !Task.isCancelled {
                     try? await Task.sleep(for: .seconds(60))
                     guard let self, !Task.isCancelled else { break }
+                    // Don't re-pull the not-yet-purged demo rows back in
+                    // while the demo-mode-off HealthKit purge is in flight.
+                    guard !self.demoPurgePending else { continue }
                     await self.refreshExternal()
                 }
             }
@@ -382,8 +410,11 @@ final class GlucoseModel: ObservableObject {
     /// turn-on, so a running session's edits aren't clobbered), inject a fresh
     /// synthetic 48 h series through `ingest()`, and refresh it every ~60 s so
     /// the hero reading stays "Live" and insights land as their 3 h windows
-    /// pass. When off: stop the refresh and drop any leftover synthetic series
-    /// (a real reader, if paired, would re-fill it).
+    /// pass. When off: stop the refresh, DROP all synthetic state (the
+    /// in-memory series, anything the Health read-back re-surfaced, the demo
+    /// meals, and the demo rows this app wrote to Health), and start the real
+    /// reader if a sensor is paired — turning off demo mode must leave a
+    /// clean, sensor-driven app, never a mix of fake and real data.
     func applyDemoMode() {
         if demoMode {
             // Inject the synthetic series FIRST so the merged series is
@@ -399,11 +430,25 @@ final class GlucoseModel: ObservableObject {
             startDemoRefresh()
         } else {
             stopDemoRefresh()
-            // Only clear the synthetic series if the user hasn't since turned
-            // demo mode off with a real sensor reading present.
-            if samples.isEmpty {
-                recomputeAll()
+            // Demo data must not survive the switch — and it can't be
+            // distinguished by freshness, so it is removed by provenance:
+            // the in-memory synthetic series, the Health read-back copy, the
+            // seeded demo meals (known descriptions), and the rows this app
+            // pushed to Health during demo sessions.
+            samples = []
+            externalSamples = []
+            foodLog.removeDemoMeals()
+            recomputeAll()
+            // A real sensor paired during/after the demo session takes over
+            // now (start() skipped the reader while demo mode was on).
+            if directReader.hasSavedState {
+                directReader.start()
             }
+            // Purge the demo rows from Health, then re-sync the read-back so
+            // the merged series reflects real data only. (The 60 s external
+            // refresh is guarded while the purge is in flight, so the stale
+            // rows can't be pulled back in mid-purge.)
+            scheduleDemoHKPurge()
         }
         refreshDerived()
     }
@@ -445,6 +490,20 @@ final class GlucoseModel: ObservableObject {
     private func stopDemoRefresh() {
         demoRefreshTask?.cancel()
         demoRefreshTask = nil
+    }
+
+    /// Kick off the HealthKit demo-row purge (and, when done, the read-back
+    /// re-sync), guarding the 60 s external refresh for its duration.
+    private func scheduleDemoHKPurge() {
+        demoPurgePending = true
+        Task { [weak self] in
+            guard let self else { return }
+            await self.healthKit.purgeDemoGlucose()
+            self.demoPurgePending = false
+            if self.healthKitEnabled {
+                await self.refreshExternal()
+            }
+        }
     }
 
     // MARK: Derived
@@ -490,7 +549,10 @@ final class GlucoseModel: ObservableObject {
         analytics24h = stats
         burnMode = GlucoseAnalytics.burnMode(stats: stats, trend: trend)
         tips = GlucoseAnalytics.tips(stats: stats, latest: merged.last, trend: trend)
-        if healthKitEnabled {
+        // Demo samples must never reach the Health app: the read-back
+        // (`refreshExternal`) would pull them straight back in as "external"
+        // data, so fake history would survive demo mode being switched off.
+        if healthKitEnabled, !demoMode {
             Task { await healthKit.write(samples) }
         }
         // Push the live reading to the watch (WatchConnectivity). The watch's

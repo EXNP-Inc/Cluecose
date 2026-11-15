@@ -44,6 +44,10 @@ fi
 
 [[ -x tools/xcodegen/bin/xcodegen ]] || ./scripts/bootstrap.sh
 
+# Inject the (gitignored) LLM key into the bundle resource, then verify the
+# finished app actually carries it — a missing key silently disables food
+# analysis, so make that visible at build time.
+./scripts/refresh-food-key.sh
 echo "── Building $SCHEME ($CONFIG, destination: $DEST) ──────────────────"
 xcodebuild \
     -project "$PROJECT" \
@@ -58,6 +62,11 @@ APP="$DERIVED/Build/Products/$CONFIG-iphoneos/Cluecose.app"
 if [[ ! -d "$APP" ]]; then
     echo "✗ build product not found at $APP"
     exit 1
+fi
+if [[ -f "$APP/FoodLLMKey.json" ]]; then
+    echo "✓ bundle carries FoodLLMKey.json (food analysis enabled)"
+else
+    echo "⚠ bundle does NOT carry FoodLLMKey.json — food analysis will be DISABLED in this build (log the key at /Users/dsikic/cluecose-android/.food_key and rebuild)."
 fi
 echo "✓ built $APP"
 

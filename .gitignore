@@ -15,3 +15,8 @@ CluecoseCore/.swiftpm/
 
 # SwiftPM build output
 CluecoseCore/.build/
+
+# Nutrition-estimation LLM key (injected at build time from
+# /Users/dsikic/cluecose-android/.food_key — never committed).
+source/Cluecose/Resources/FoodLLMKey.json
+android/app/src/main/assets/food_llm_key.json

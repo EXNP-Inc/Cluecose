@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		03CA1E9046693E7A90029A4C /* CluecoseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 35AB440722C80622CEED680A /* CluecoseCore */; };
+		067B5DE3FCF493DC97336AD2 /* FoodLLMKey.json in Resources */ = {isa = PBXBuildFile; fileRef = BBAEF802E67CBB1F217954A9 /* FoodLLMKey.json */; };
 		0AF59C475BB4D512260EFB8F /* LibreDirectReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B08618405AAB2753F8DD671D /* LibreDirectReader.swift */; };
 		13DA6BDA5ADFC884DDE18A57 /* HealthKitSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D84E1741E260B47B7A64CA /* HealthKitSync.swift */; };
 		1615A5C975C851EDCF1F1FD8 /* CluecoseWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = D35DC6762C635BB7449FA41D /* CluecoseWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -122,6 +123,7 @@
 		B02DDCCD02360299425C1A1C /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
 		B08618405AAB2753F8DD671D /* LibreDirectReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibreDirectReader.swift; sourceTree = "<group>"; };
 		B6B83EBAE435BB9A1726B414 /* CluecoseTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CluecoseTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		BBAEF802E67CBB1F217954A9 /* FoodLLMKey.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = FoodLLMKey.json; sourceTree = "<group>"; };
 		C0479789E25D323F5D985660 /* NutritionSleep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionSleep.swift; sourceTree = "<group>"; };
 		C3048089BA4A05883A5A97D5 /* CluecoseTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CluecoseTheme.swift; sourceTree = "<group>"; };
 		C89B7C1E6D5849FF05BED667 /* CluecoseCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = CluecoseCore; path = CluecoseCore; sourceTree = SOURCE_ROOT; };
@@ -263,6 +265,14 @@
 			path = CluecoseLiveActivity;
 			sourceTree = "<group>";
 		};
+		BF3D92D3CFEFD9A45C7212E3 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				BBAEF802E67CBB1F217954A9 /* FoodLLMKey.json */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
 		C1DA7BC4772D3DFC953752C6 /* Cluecose */ = {
 			isa = PBXGroup;
 			children = (
@@ -279,6 +289,7 @@
 				324A0AA6EABF974BAAE5594A /* HealthKit */,
 				D92BB5E6D43D0DACB094E345 /* Libre */,
 				4CF2E06FB35DA7AD4BD3BFC1 /* LiveActivity */,
+				BF3D92D3CFEFD9A45C7212E3 /* Resources */,
 			);
 			path = Cluecose;
 			sourceTree = "<group>";
@@ -483,6 +494,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				7B128E2A51D0AFCCB77E9CB1 /* Assets.xcassets in Resources */,
+				067B5DE3FCF493DC97336AD2 /* FoodLLMKey.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

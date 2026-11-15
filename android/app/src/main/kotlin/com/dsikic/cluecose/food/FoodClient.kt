@@ -75,10 +75,31 @@ data class FoodLLMConfig(
         const val defaultBaseURL = "https://api.openai.com/v1"
         const val defaultModel = "gpt-4o-mini"
 
+        /**
+         * The OpenAI key bundled with THIS build. It is written into
+         * `assets/food_llm_key.json` by `scripts/refresh-food-key.sh` from a
+         * gitignored local key file, so the key never lands in the repository
+         * (GitHub secret scanning rejects pushes that carry a real
+         * `sk-proj-` key). Null on builds made without the local key file —
+         * the feature is then disabled and the sheet offers manual entry.
+         */
+        fun bundledKey(context: Context): String? = try {
+            context.assets.open("food_llm_key.json").bufferedReader().use { r ->
+                JSONObject(r.readText()).optString("apiKey", "")
+            }.ifEmpty { null }
+        } catch (e: Exception) {
+            null
+        }
+
         /** Load the stored config (defaults when absent/unreadable). */
         fun load(context: Context): FoodLLMConfig {
             val prefs = context.getSharedPreferences("cluecose", Context.MODE_PRIVATE)
-            val raw = prefs.getString(key, null) ?: return FoodLLMConfig()
+            val raw = prefs.getString(key, null)
+            if (raw == null) {
+                // Fresh install: default to the build-bundled key, if one was
+                // injected at build time (feature enabled out of the box).
+                return FoodLLMConfig(apiKey = bundledKey(context) ?: "")
+            }
             return try {
                 val o = JSONObject(raw)
                 FoodLLMConfig(

@@ -392,6 +392,13 @@ struct FoodDetailView: View {
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.45))
             }
+            if [entry.caloriesKcal, entry.proteinG, entry.carbsG, entry.fatG,
+                entry.saturatedFatG, entry.sodiumMg, entry.caffeineMg, entry.alcoholG]
+                .allSatisfy({ $0 == nil }) {
+                Text("Nutrition wasn't analyzed (the model endpoint is unavailable right now). The meal is logged as-is — open it and enter values, or save it again later to retry.")
+                    .font(.caption2)
+                    .foregroundStyle(.orange.opacity(0.8))
+            }
         }
         .glassPanel()
     }

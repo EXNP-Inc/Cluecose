@@ -410,6 +410,21 @@ struct FoodLogSheet: View {
         if saved.description != descriptionText {
             modelDescription = saved.description
         }
+        // The analysis failed (endpoint unusable): the meal was saved with
+        // BLANK values. Keep the sheet open so the user can fill the rows in
+        // by hand right now — a re-save with the description unchanged will
+        // not re-run the analysis, so the hand-entered values stick.
+        let noValues = [saved.caloriesKcal, saved.proteinG, saved.carbsG, saved.fatG,
+                        saved.saturatedFatG, saved.sodiumMg, saved.caffeineMg, saved.alcoholG]
+            .allSatisfy { $0 == nil }
+        if noValues && !photosToSend.isEmpty {
+            errorMessage = "Saved — but the model couldn't analyze this photo. Enter the values below to fill it in."
+            return
+        }
+        if noValues {
+            errorMessage = "Saved — but the model endpoint is unavailable, so no nutrition was analyzed. Enter the values below, or tap Save again later to retry."
+            return
+        }
         dismiss()
     }
 

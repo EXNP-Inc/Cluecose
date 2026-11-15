@@ -60,13 +60,24 @@ struct FoodLLMConfig: Codable {
     static let key = "cluecose.food.llm.config"
     static let defaultBaseURL = "https://api.openai.com/v1"
     static let defaultModel = "gpt-4o-mini"
-    /// Built-in OpenAI key so the feature works out of the box (simulator demo).
-    /// Overridable in Settings; if a user clears the field it falls back to this.
-    static let builtInKey = "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"
+
+    /// The OpenAI key bundled with THIS build. It is written into
+    /// `source/Cluecose/Resources/FoodLLMKey.json` by the build scripts from a
+    /// gitignored local file, so the key never lands in the repository (GitHub
+    /// secret scanning rejects pushes that carry a real `sk-proj-` key).
+    /// `nil` on builds made from a clean checkout without the local file.
+    static func bundledKey() -> String? {
+        guard let url = Bundle.main.url(forResource: "FoodLLMKey", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let key = obj["apiKey"] as? String,
+              !key.isEmpty else { return nil }
+        return key
+    }
 
     init(baseURL: String = FoodLLMConfig.defaultBaseURL,
          model: String = FoodLLMConfig.defaultModel,
-         apiKey: String = FoodLLMConfig.builtInKey) {
+         apiKey: String = FoodLLMConfig.bundledKey() ?? "") {
         self.baseURL = baseURL
         self.model = model
         self.apiKey = apiKey
@@ -79,8 +90,8 @@ struct FoodLLMConfig: Codable {
            let cfg = try? JSONDecoder().decode(FoodLLMConfig.self, from: data) {
             return cfg   // respect whatever the user last saved (incl. a cleared key)
         }
-        // Fresh install: default to the built-in OpenAI key so the feature is
-        // enabled out of the box.
+        // Fresh install: default to the build-bundled key, if one was
+        // injected at build time (feature enabled out of the box).
         return FoodLLMConfig()
     }
 
@@ -187,63 +198,21 @@ final class FoodLLMClient: FoodEstimating {
 
     // MARK: Local fallback estimate
 
-    /// A deterministic, keyword-based nutrition estimate used when the model
-    /// endpoint is unreachable — most notably when the configured OpenAI key
-    /// has no credits (HTTP 429 `credit_balance_exhausted`), as on this
-    /// simulator, but also when offline or the model returns garbage. The LLM
-    /// is still the primary estimator; this only ensures the feature WORKS on
-    /// a device without a functioning LLM account. Values are rough (an order
-    /// of magnitude), clearly an estimate, and the caller labels them as such.
+    /// Used when the model endpoint can't return an estimate (no key,
+    /// invalid/out-of-credits key, offline, or unparseable response).
+    ///
+    /// It deliberately returns NO nutrient values. An earlier version guessed
+    /// a keyword-based "typical meal" (a 450 kcal base, then nudged by words
+    /// like "sugar"), which silently logged wrong macros — a 5-kcal serving
+    /// of Metamucil was stored as ~475 kcal. A meal we couldn't analyze must
+    /// be saved with blank values and clearly flagged, never with invented
+    /// numbers: the user then enters values by hand (or the LLM works again
+    /// and a re-save fills them in). The empty estimate is also what tells
+    /// `FoodLogModel.saveEntry` the analysis failed.
     func fallbackEstimate(description: String,
                           serving: String? = nil,
                           context: String? = nil) -> NutritionPrompt.Estimate {
-        let text = (description + " " + (serving ?? "") + " " + (context ?? "")).lowercased()
-        func has(_ words: [String]) -> Bool { words.contains { text.contains($0) } }
-
-        // Plausible base for a typical mixed meal, then nudged by keywords.
-        var e = NutritionPrompt.Estimate(caloriesKcal: 450, proteinG: 20, carbsG: 50,
-                                         fatG: 15, saturatedFatG: 5, sodiumMg: 500,
-                                         caffeineMg: 0, alcoholG: 0,
-                                         description: description.isEmpty ? nil : description)
-
-        if has(["coffee", "espresso", "latte", "cappuccino", "americano", "mocha",
-                "matcha", "energy drink", "red bull", "monster", "black tea", "green tea", "chai"]) {
-            e.caffeineMg = has(["espresso", "double", "shot", "red bull", "monster"]) ? 180 : 95
-        }
-        if has(["soda", "coke", "cola", "pepsi", "fanta", "sprite", "root beer"]) {
-            e.caffeineMg = 34
-        }
-        if has(["beer", "ale", "lager", "stout", "wine", "cocktail", "whiskey", "whisky",
-                "vodka", "rum", "gin", "bourbon", "tequila", "martini", "mojito", "champagne"]) {
-            e.alcoholG = has(["cocktail", "martini", "mojito"]) ? 21 : 14
-        }
-        if has(["chicken", "beef", "steak", "pork", "fish", "salmon", "tuna", "shrimp",
-                "prawn", "egg", "eggs", "tofu", "bean", "lentil", "meat", "lamb", "turkey",
-                "ham", "bacon", "chickpea", "tempeh"]) {
-            e.proteinG = 35
-            e.saturatedFatG = has(["bacon", "beef", "pork", "lamb", "steak"]) ? 9 : 6
-        }
-        if has(["rice", "bread", "pasta", "noodle", "spaghetti", "potato", "mashed",
-                "wrap", "tortilla", "pizza", "bagel", "croissant", "cereal", "oat", "oatmeal",
-                "quinoa", "couscous", "tortilla", "cracker"]) {
-            e.carbsG = 60
-        }
-        if has(["cake", "cookie", "cupcake", "donut", "pastry", "dessert", "ice cream",
-                "chocolate", "sugar", "honey", "syrup", "candy", "donut"]) {
-            e.carbsG = 65
-            e.saturatedFatG = max(e.saturatedFatG ?? 5, 8)
-            e.caloriesKcal = 400
-        }
-        if has(["cheese", "butter", "cream", "mayo", "mayonnaise", "avocado", "oil",
-                "greek yogurt", "yogurt", "milk", "almond milk", "olive"]) {
-            e.fatG = 22
-            e.saturatedFatG = max(e.saturatedFatG ?? 5, has(["cheese", "butter", "cream", "mayo", "mayonnaise"]) ? 12 : 6)
-        }
-        // Keep calories roughly consistent with the macros (4/9/7 kcal per g).
-        if let p = e.proteinG, let c = e.carbsG, let f = e.fatG {
-            e.caloriesKcal = (p * 4 + c * 4 + f * 9).rounded()
-        }
-        return e
+        NutritionPrompt.Estimate(description: description.isEmpty ? nil : description)
     }
 
     // MARK: Transport
