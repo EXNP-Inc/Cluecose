@@ -15,9 +15,10 @@
 //      identical `{{marker}}` substitution, so the model sees the same
 //      instruction.
 //    • The LLM is asked for strict JSON with the snake_case keys
-//      calories_kcal / protein_g / carbs_g / fat_g / saturated_fat_g /
-//      sodium_mg / caffeine_mg / alcohol_g / description, plus an optional
-//      `citations` array of {title, url} objects for web-grounded estimates.
+//      calories_kcal / protein_g / carbs_g / fibre_g / fat_g /
+//      saturated_fat_g / sodium_mg / caffeine_mg / alcohol_g / description,
+//      plus an optional `citations` array of {title, url} objects for
+//      web-grounded estimates.
 //      `parseResponse` accepts a raw model string (it tolerates code fences
 //      and surrounding prose) and returns a `NutritionEstimate`.
 //
@@ -68,6 +69,7 @@ object NutritionPrompt {
         val caloriesKcal: Double? = null,
         val proteinG: Double? = null,
         val carbsG: Double? = null,
+        val fibreG: Double? = null,
         val fatG: Double? = null,
         val saturatedFatG: Double? = null,
         val sodiumMg: Double? = null,
@@ -82,8 +84,9 @@ object NutritionPrompt {
         /** True when nothing usable came back (citations alone don't count). */
         val isEmpty: Boolean
             get() = caloriesKcal == null && proteinG == null && carbsG == null &&
-                fatG == null && saturatedFatG == null && sodiumMg == null &&
-                caffeineMg == null && alcoholG == null && description == null
+                fibreG == null && fatG == null && saturatedFatG == null &&
+                sodiumMg == null && caffeineMg == null && alcoholG == null &&
+                description == null
     }
 
     // MARK: Prompt building
@@ -145,6 +148,7 @@ object NutritionPrompt {
             caloriesKcal = number(obj["calories_kcal"]),
             proteinG = number(obj["protein_g"]),
             carbsG = number(obj["carbs_g"]),
+            fibreG = number(obj["fibre_g"]),
             fatG = number(obj["fat_g"]),
             saturatedFatG = number(obj["saturated_fat_g"]),
             sodiumMg = number(obj["sodium_mg"]),

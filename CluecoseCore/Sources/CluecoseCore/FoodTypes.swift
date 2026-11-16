@@ -18,9 +18,10 @@
 //      component, and a hand-entered row may leave one blank.
 //
 //  Nutrient set (deliberately limited — this is a CGM companion, not a
-//  clinical diet app): calories, the three macros, sodium and caffeine, plus
-//  two macro-level nutrients carried over from the ported product (alcohol
-//  and saturated fat). There are NO vitamins or minerals by design.
+//  clinical diet app): calories, the three macros plus dietary fibre, sodium
+//  and caffeine, and two macro-level nutrients carried over from the ported
+//  product (alcohol and saturated fat). There are NO vitamins or minerals by
+//  design.
 //
 //  Ported capabilities (see the feature set in the PR description):
 //    • Up to 5 meal photos per entry (`photoFileNames`).
@@ -94,6 +95,8 @@ public struct FoodEntry: Identifiable, Codable, Equatable, Sendable {
     public var alcoholG: Double?
     /// Saturated fat in grams (ported fat-quality dimension; null = unknown).
     public var saturatedFatG: Double?
+    /// Dietary fibre in grams (null = unknown / not applicable).
+    public var fibreG: Double?
     /// Clickable sources supporting the estimate (web-grounded analyses).
     public var citations: [SourceCitation]?
     /// True while the values are still the model's estimate and the user has
@@ -121,6 +124,7 @@ public struct FoodEntry: Identifiable, Codable, Equatable, Sendable {
                 caffeineMg: Double? = nil,
                 alcoholG: Double? = nil,
                 saturatedFatG: Double? = nil,
+                fibreG: Double? = nil,
                 citations: [SourceCitation]? = nil,
                 isEstimated: Bool = false,
                 insight: MealInsight? = nil) {
@@ -140,6 +144,7 @@ public struct FoodEntry: Identifiable, Codable, Equatable, Sendable {
         self.caffeineMg = caffeineMg
         self.alcoholG = alcoholG
         self.saturatedFatG = saturatedFatG
+        self.fibreG = fibreG
         self.citations = citations
         self.isEstimated = isEstimated
         self.insight = insight
@@ -151,7 +156,7 @@ public struct FoodEntry: Identifiable, Codable, Equatable, Sendable {
         case id, dateEpochSeconds, description, serving, context, source, photoFileNames
         case portionMultiplier
         case caloriesKcal, proteinG, carbsG, fatG, sodiumMg, caffeineMg
-        case alcoholG, saturatedFatG, citations, isEstimated, insight
+        case alcoholG, saturatedFatG, fibreG, citations, isEstimated, insight
     }
 
     public init(from decoder: Decoder) throws {
@@ -181,6 +186,7 @@ public struct FoodEntry: Identifiable, Codable, Equatable, Sendable {
         caffeineMg = try c.decodeIfPresent(Double.self, forKey: .caffeineMg)
         alcoholG = try c.decodeIfPresent(Double.self, forKey: .alcoholG)
         saturatedFatG = try c.decodeIfPresent(Double.self, forKey: .saturatedFatG)
+        fibreG = try c.decodeIfPresent(Double.self, forKey: .fibreG)
         citations = try c.decodeIfPresent([SourceCitation].self, forKey: .citations)
         isEstimated = try c.decodeIfPresent(Bool.self, forKey: .isEstimated) ?? false
         insight = try c.decodeIfPresent(MealInsight.self, forKey: .insight)
@@ -206,6 +212,7 @@ public struct FoodEntry: Identifiable, Codable, Equatable, Sendable {
         try c.encodeIfPresent(caffeineMg, forKey: .caffeineMg)
         try c.encodeIfPresent(alcoholG, forKey: .alcoholG)
         try c.encodeIfPresent(saturatedFatG, forKey: .saturatedFatG)
+        try c.encodeIfPresent(fibreG, forKey: .fibreG)
         try c.encodeIfPresent(citations, forKey: .citations)
         try c.encode(isEstimated, forKey: .isEstimated)
         try c.encodeIfPresent(insight, forKey: .insight)
@@ -284,6 +291,7 @@ public struct FoodTotals: Equatable, Sendable {
     public var kcal: Double?
     public var proteinG: Double?
     public var carbsG: Double?
+    public var fibreG: Double?
     public var fatG: Double?
     public var sodiumMg: Double?
     public var caffeineMg: Double?
@@ -301,6 +309,7 @@ public struct FoodTotals: Equatable, Sendable {
             t.kcal = add(t.kcal, e.caloriesKcal)
             t.proteinG = add(t.proteinG, e.proteinG)
             t.carbsG = add(t.carbsG, e.carbsG)
+            t.fibreG = add(t.fibreG, e.fibreG)
             t.fatG = add(t.fatG, e.fatG)
             t.sodiumMg = add(t.sodiumMg, e.sodiumMg)
             t.caffeineMg = add(t.caffeineMg, e.caffeineMg)

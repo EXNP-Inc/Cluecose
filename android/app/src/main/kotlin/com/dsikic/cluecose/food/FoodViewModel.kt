@@ -75,16 +75,11 @@ data class FoodUiState(
  *  • [Ready]   — the insight has been computed and is on the entry.
  *  • [Pending] — the post-meal window hasn't fully elapsed yet: the curve is
  *    still forming, and the analysis will run at [Pending.readyAtMs].
- *  • [Settled] — the window has fully elapsed and the engine ran (the curve
- *    was flat or too sparse to judge): no insight will ever appear for this
- *    meal. Terminal, not "waiting".
+ *  • [Settled] — the window has fully elapsed and the engine ran (or found
+ *    the curve flat / the data too sparse to judge): no insight will ever
+ *    appear for this meal. Terminal, not "waiting".
  *  • [NoData]  — the app has no glucose series at all, so nothing can be
  *    analyzed yet.
- *  • [NoWindowData] — a series exists but NOTHING falls inside this meal's
- *    analysis window (30 min before → 3 h after): the meal was logged before
- *    the sensor started, across a gap, or into an era with no readings. The
- *    analysis cannot run and never will. Terminal — distinct from [Settled]
- *    (which had data in the window).
  */
 sealed interface MealAnalytics {
     object Ready : MealAnalytics
@@ -261,6 +256,7 @@ class FoodViewModel
         var caloriesKcal: Double? = null,
         var proteinG: Double? = null,
         var carbsG: Double? = null,
+        var fibreG: Double? = null,
         var fatG: Double? = null,
         var saturatedFatG: Double? = null,
         var sodiumMg: Double? = null,
@@ -359,8 +355,9 @@ class FoodViewModel
             val hasDescription = values.description.isNotBlank()
             val hasPhotos = values.source == FoodSource.PHOTO && photos.isNotEmpty()
             val hasRows = listOf(
-                values.caloriesKcal, values.proteinG, values.carbsG, values.fatG,
-                values.saturatedFatG, values.sodiumMg, values.caffeineMg, values.alcoholG,
+                values.caloriesKcal, values.proteinG, values.carbsG, values.fibreG,
+                values.fatG, values.saturatedFatG, values.sodiumMg, values.caffeineMg,
+                values.alcoholG,
             ).any { it != null }
             if (!hasDescription && !hasPhotos && !hasRows) return entry
         }
@@ -431,6 +428,7 @@ class FoodViewModel
                 caloriesKcal = s(current.caloriesKcal),
                 proteinG = s(current.proteinG),
                 carbsG = s(current.carbsG),
+                fibreG = s(current.fibreG),
                 fatG = s(current.fatG),
                 saturatedFatG = s(current.saturatedFatG),
                 sodiumMg = s(current.sodiumMg),
@@ -450,6 +448,7 @@ class FoodViewModel
             caloriesKcal = values.caloriesKcal?.let { Math.round(it * p).toDouble() } ?: entry.caloriesKcal,
             proteinG = values.proteinG?.let { Math.round(it * p).toDouble() } ?: entry.proteinG,
             carbsG = values.carbsG?.let { Math.round(it * p).toDouble() } ?: entry.carbsG,
+            fibreG = values.fibreG?.let { Math.round(it * p).toDouble() } ?: entry.fibreG,
             fatG = values.fatG?.let { Math.round(it * p).toDouble() } ?: entry.fatG,
             saturatedFatG = values.saturatedFatG?.let { Math.round(it * p).toDouble() } ?: entry.saturatedFatG,
             sodiumMg = values.sodiumMg?.let { Math.round(it * p).toDouble() } ?: entry.sodiumMg,
@@ -461,8 +460,9 @@ class FoodViewModel
         // (The sheet blocks the button too; this is the model-level
         // guarantee. Nothing is persisted in that case.)
         val hasNutrition = listOf(
-            entry.caloriesKcal, entry.proteinG, entry.carbsG, entry.fatG,
-            entry.saturatedFatG, entry.sodiumMg, entry.caffeineMg, entry.alcoholG,
+            entry.caloriesKcal, entry.proteinG, entry.carbsG, entry.fibreG,
+            entry.fatG, entry.saturatedFatG, entry.sodiumMg, entry.caffeineMg,
+            entry.alcoholG,
         ).any { it != null }
         val hasPhotos = values.source == FoodSource.PHOTO && photos.isNotEmpty()
         // A meal whose analysis FAILED (the endpoint was unusable) carries
@@ -517,6 +517,7 @@ class FoodViewModel
             caloriesKcal = s(e.caloriesKcal),
             proteinG = s(e.proteinG),
             carbsG = s(e.carbsG),
+            fibreG = s(e.fibreG),
             fatG = s(e.fatG),
             saturatedFatG = s(e.saturatedFatG),
             sodiumMg = s(e.sodiumMg),
@@ -538,8 +539,9 @@ class FoodViewModel
             context = updated.context,
             source = updated.source,
             // nil = "no hand edit here" → the (re)estimate / stored values win.
-            caloriesKcal = null, proteinG = null, carbsG = null, fatG = null,
-            saturatedFatG = null, sodiumMg = null, caffeineMg = null, alcoholG = null,
+            caloriesKcal = null, proteinG = null, carbsG = null, fibreG = null,
+            fatG = null, saturatedFatG = null, sodiumMg = null, caffeineMg = null,
+            alcoholG = null,
             citations = updated.citations.orEmpty(),
             portionMultiplier = updated.portionMultiplier,
             dateEpochSeconds = updated.dateEpochSeconds,
@@ -794,6 +796,7 @@ class FoodViewModel
             caloriesKcal = estimate.caloriesKcal,
             proteinG = estimate.proteinG,
             carbsG = estimate.carbsG,
+            fibreG = estimate.fibreG,
             fatG = estimate.fatG,
             sodiumMg = estimate.sodiumMg,
             caffeineMg = estimate.caffeineMg,

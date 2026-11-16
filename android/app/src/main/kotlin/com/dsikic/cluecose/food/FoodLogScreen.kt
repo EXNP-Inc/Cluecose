@@ -183,8 +183,9 @@ private fun TotalsRow(t: FoodTotals) {
                 TotalPill("Na", t.sodiumMg, "mg")
                 TotalPill("Caf", t.caffeineMg, "mg")
             }
-            // Secondary line: alcohol + saturated fat (only when > 0).
+            // Secondary line: fibre, alcohol + saturated fat (only when > 0).
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                t.fibreG?.takeIf { it > 0 }?.let { TotalPill("Fib", it, "g") }
                 t.alcoholG?.takeIf { it > 0 }?.let { TotalPill("Alc", it, "g") }
                 t.saturatedFatG?.takeIf { it > 0 }?.let { TotalPill("Sat", it, "g") }
                 Spacer(modifier = Modifier.weight(1f))

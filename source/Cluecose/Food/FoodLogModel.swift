@@ -220,6 +220,7 @@ final class FoodLogModel: ObservableObject {
         var caloriesKcal: Double? = nil
         var proteinG: Double? = nil
         var carbsG: Double? = nil
+        var fibreG: Double? = nil
         var fatG: Double? = nil
         var saturatedFatG: Double? = nil
         var sodiumMg: Double? = nil
@@ -301,8 +302,8 @@ final class FoodLogModel: ObservableObject {
                 .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             let hasPhotos = values.source == .photo && !photos.isEmpty
             let hasRows = [values.caloriesKcal, values.proteinG, values.carbsG,
-                           values.fatG, values.saturatedFatG, values.sodiumMg,
-                           values.caffeineMg, values.alcoholG]
+                           values.fibreG, values.fatG, values.saturatedFatG,
+                           values.sodiumMg, values.caffeineMg, values.alcoholG]
                 .contains { $0 != nil }
             guard hasDescription || hasPhotos || hasRows else { return entry }
         }
@@ -386,6 +387,7 @@ final class FoodLogModel: ObservableObject {
             entry.caloriesKcal = s(current.caloriesKcal)
             entry.proteinG = s(current.proteinG)
             entry.carbsG = s(current.carbsG)
+            entry.fibreG = s(current.fibreG)
             entry.fatG = s(current.fatG)
             entry.saturatedFatG = s(current.saturatedFatG)
             entry.sodiumMg = s(current.sodiumMg)
@@ -405,6 +407,7 @@ final class FoodLogModel: ObservableObject {
         if let v = values.caloriesKcal { entry.caloriesKcal = (v * p).rounded() }
         if let v = values.proteinG { entry.proteinG = (v * p).rounded() }
         if let v = values.carbsG { entry.carbsG = (v * p).rounded() }
+        if let v = values.fibreG { entry.fibreG = (v * p).rounded() }
         if let v = values.fatG { entry.fatG = (v * p).rounded() }
         if let v = values.saturatedFatG { entry.saturatedFatG = (v * p).rounded() }
         if let v = values.sodiumMg { entry.sodiumMg = (v * p).rounded() }
@@ -415,8 +418,8 @@ final class FoodLogModel: ObservableObject {
         // (The sheet blocks the button too; this is the model-level
         // guarantee. Nothing is persisted in that case.)
         let hasNutrition = [entry.caloriesKcal, entry.proteinG, entry.carbsG,
-                            entry.fatG, entry.saturatedFatG, entry.sodiumMg,
-                            entry.caffeineMg, entry.alcoholG]
+                            entry.fibreG, entry.fatG, entry.saturatedFatG,
+                            entry.sodiumMg, entry.caffeineMg, entry.alcoholG]
             .contains { $0 != nil }
         let hasPhotos = values.source == .photo && !photos.isEmpty
         // A meal whose analysis FAILED (the endpoint was unusable) carries no
@@ -494,8 +497,9 @@ final class FoodLogModel: ObservableObject {
             serving: entry.serving,
             context: entry.context,
             source: entry.source,
-            caloriesKcal: nil, proteinG: nil, carbsG: nil, fatG: nil,
-            saturatedFatG: nil, sodiumMg: nil, caffeineMg: nil, alcoholG: nil,
+            caloriesKcal: nil, proteinG: nil, carbsG: nil, fibreG: nil,
+            fatG: nil, saturatedFatG: nil, sodiumMg: nil, caffeineMg: nil,
+            alcoholG: nil,
             citations: entry.citations ?? [],
             portionMultiplier: entry.portionMultiplier
         )
@@ -508,6 +512,7 @@ final class FoodLogModel: ObservableObject {
             caloriesKcal: s(e.caloriesKcal),
             proteinG: s(e.proteinG),
             carbsG: s(e.carbsG),
+            fibreG: s(e.fibreG),
             fatG: s(e.fatG),
             saturatedFatG: s(e.saturatedFatG),
             sodiumMg: s(e.sodiumMg),
@@ -702,6 +707,7 @@ final class FoodLogModel: ObservableObject {
         entry.caloriesKcal = estimate.caloriesKcal
         entry.proteinG = estimate.proteinG
         entry.carbsG = estimate.carbsG
+        entry.fibreG = estimate.fibreG
         entry.fatG = estimate.fatG
         entry.sodiumMg = estimate.sodiumMg
         entry.caffeineMg = estimate.caffeineMg

@@ -19,6 +19,7 @@ with exactly these keys (numbers, or null):
   "calories_kcal": <total calories in kcal>,
   "protein_g": <total protein in grams>,
   "carbs_g": <total carbohydrate in grams>,
+  "fibre_g": <total dietary fibre in grams, null if unknown>,
   "fat_g": <total fat in grams>,
   "saturated_fat_g": <total saturated fat in grams, null if unknown>,
   "sodium_mg": <total sodium in milligrams>,

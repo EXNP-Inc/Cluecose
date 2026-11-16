@@ -17,9 +17,10 @@
 //      component, and a hand-entered row may leave one blank.
 //
 //  Nutrient set (deliberately limited — this is a CGM companion, not a
-//  clinical diet app): calories, the three macros, sodium and caffeine, plus
-//  two macro-level nutrients carried over from the ported product (alcohol
-//  and saturated fat). There are NO vitamins or minerals by design.
+//  clinical diet app): calories, the three macros plus dietary fibre, sodium
+//  and caffeine, and two macro-level nutrients carried over from the ported
+//  product (alcohol and saturated fat). There are NO vitamins or minerals by
+//  design.
 //
 //  Leniency (mirrors the Swift custom Codable):
 //    • On decode, a missing `id` gets a fresh UUID, a missing `source`
@@ -157,6 +158,8 @@ data class FoodEntry(
     val alcoholG: Double? = null,
     /** Saturated fat in grams (ported fat-quality dimension; null = unknown). */
     val saturatedFatG: Double? = null,
+    /** Dietary fibre in grams (null = unknown / not applicable). */
+    val fibreG: Double? = null,
     /** Clickable sources supporting the estimate (web-grounded analyses). */
     val citations: List<SourceCitation>? = null,
     /** True while the values are still the model's estimate and the user has
@@ -190,6 +193,7 @@ object FoodEntrySerializer : KSerializer<FoodEntry> {
         element("caffeineMg", Double.serializer().descriptor)
         element("alcoholG", Double.serializer().descriptor)
         element("saturatedFatG", Double.serializer().descriptor)
+        element("fibreG", Double.serializer().descriptor)
         element("citations", ListSerializer(SourceCitation.serializer()).descriptor)
         element("isEstimated", Boolean.serializer().descriptor)
         element("insight", MealInsight.serializer().descriptor)
@@ -223,6 +227,7 @@ object FoodEntrySerializer : KSerializer<FoodEntry> {
         value.caffeineMg?.let { o["caffeineMg"] = JsonPrimitive(it) }
         value.alcoholG?.let { o["alcoholG"] = JsonPrimitive(it) }
         value.saturatedFatG?.let { o["saturatedFatG"] = JsonPrimitive(it) }
+        value.fibreG?.let { o["fibreG"] = JsonPrimitive(it) }
         // `encodeIfPresent` — omitted entirely when null (not written as []).
         value.citations?.let { list ->
             o["citations"] = JsonArray(
@@ -293,6 +298,7 @@ object FoodEntrySerializer : KSerializer<FoodEntry> {
             caffeineMg = numOrNull("caffeineMg"),
             alcoholG = numOrNull("alcoholG"),
             saturatedFatG = numOrNull("saturatedFatG"),
+            fibreG = numOrNull("fibreG"),
             citations = o["citations"]?.let { el ->
                 if (el is JsonNull) null
                 else (el as? JsonArray)?.mapNotNull { item ->
@@ -470,6 +476,7 @@ data class FoodTotals(
     val kcal: Double? = null,
     val proteinG: Double? = null,
     val carbsG: Double? = null,
+    val fibreG: Double? = null,
     val fatG: Double? = null,
     val sodiumMg: Double? = null,
     val caffeineMg: Double? = null,
@@ -483,6 +490,7 @@ data class FoodTotals(
             var kcal: Double? = null
             var protein: Double? = null
             var carbs: Double? = null
+            var fibre: Double? = null
             var fat: Double? = null
             var sodium: Double? = null
             var caffeine: Double? = null
@@ -492,6 +500,7 @@ data class FoodTotals(
                 kcal = add(kcal, e.caloriesKcal)
                 protein = add(protein, e.proteinG)
                 carbs = add(carbs, e.carbsG)
+                fibre = add(fibre, e.fibreG)
                 fat = add(fat, e.fatG)
                 sodium = add(sodium, e.sodiumMg)
                 caffeine = add(caffeine, e.caffeineMg)
@@ -502,6 +511,7 @@ data class FoodTotals(
                 kcal = kcal,
                 proteinG = protein,
                 carbsG = carbs,
+                fibreG = fibre,
                 fatG = fat,
                 sodiumMg = sodium,
                 caffeineMg = caffeine,

@@ -13,9 +13,10 @@
 //      srcDir pointing at the same file). Both do identical `{{marker}}`
 //      substitution, so the model sees the same instruction.
 //    • The LLM is asked for strict JSON with the snake_case keys
-//      calories_kcal / protein_g / carbs_g / fat_g / saturated_fat_g /
-//      sodium_mg / caffeine_mg / alcohol_g / description, plus an optional
-//      `citations` array of {title, url} objects for web-grounded estimates.
+//      calories_kcal / protein_g / carbs_g / fibre_g / fat_g /
+//      saturated_fat_g / sodium_mg / caffeine_mg / alcohol_g / description,
+//      plus an optional `citations` array of {title, url} objects for
+//      web-grounded estimates.
 //      `parseResponse` accepts a raw model string (it tolerates code fences
 //      and surrounding prose) and returns a `NutritionEstimate`.
 //
@@ -63,6 +64,7 @@ public enum NutritionPrompt: Sendable {
         public var caloriesKcal: Double?
         public var proteinG: Double?
         public var carbsG: Double?
+        public var fibreG: Double?
         public var fatG: Double?
         public var saturatedFatG: Double?
         public var sodiumMg: Double?
@@ -77,6 +79,7 @@ public enum NutritionPrompt: Sendable {
         public init(caloriesKcal: Double? = nil,
                     proteinG: Double? = nil,
                     carbsG: Double? = nil,
+                    fibreG: Double? = nil,
                     fatG: Double? = nil,
                     saturatedFatG: Double? = nil,
                     sodiumMg: Double? = nil,
@@ -87,6 +90,7 @@ public enum NutritionPrompt: Sendable {
             self.caloriesKcal = caloriesKcal
             self.proteinG = proteinG
             self.carbsG = carbsG
+            self.fibreG = fibreG
             self.fatG = fatG
             self.saturatedFatG = saturatedFatG
             self.sodiumMg = sodiumMg
@@ -97,7 +101,7 @@ public enum NutritionPrompt: Sendable {
         }
 
         public var isEmpty: Bool {
-            [caloriesKcal, proteinG, carbsG, fatG, saturatedFatG, sodiumMg, caffeineMg, alcoholG]
+            [caloriesKcal, proteinG, carbsG, fibreG, fatG, saturatedFatG, sodiumMg, caffeineMg, alcoholG]
                 .allSatisfy { $0 == nil } && description == nil
         }
     }
@@ -157,6 +161,7 @@ public enum NutritionPrompt: Sendable {
         e.caloriesKcal = number(obj["calories_kcal"])
         e.proteinG = number(obj["protein_g"])
         e.carbsG = number(obj["carbs_g"])
+        e.fibreG = number(obj["fibre_g"])
         e.fatG = number(obj["fat_g"])
         e.saturatedFatG = number(obj["saturated_fat_g"])
         e.sodiumMg = number(obj["sodium_mg"])

@@ -386,6 +386,7 @@ struct FoodDetailView: View {
         e.caloriesKcal = f(stored.caloriesKcal)
         e.proteinG = f(stored.proteinG)
         e.carbsG = f(stored.carbsG)
+        e.fibreG = f(stored.fibreG)
         e.fatG = f(stored.fatG)
         e.saturatedFatG = f(stored.saturatedFatG)
         e.sodiumMg = f(stored.sodiumMg)
@@ -407,11 +408,12 @@ struct FoodDetailView: View {
                 metric("Carbs", value: entry.carbsG.map { String(format: "%.0f g", $0) } ?? "–")
             }
             HStack(spacing: 8) {
+                metric("Fibre", value: entry.fibreG.map { String(format: "%.0f g", $0) } ?? "–")
                 metric("Fat", value: entry.fatG.map { String(format: "%.0f g", $0) } ?? "–")
                 metric("Sat fat", value: entry.saturatedFatG.map { String(format: "%.0f g", $0) } ?? "–")
-                metric("Sodium", value: entry.sodiumMg.map { String(format: "%.0f mg", $0) } ?? "–")
             }
             HStack(spacing: 8) {
+                metric("Sodium", value: entry.sodiumMg.map { String(format: "%.0f mg", $0) } ?? "–")
                 metric("Caffeine", value: entry.caffeineMg.map { String(format: "%.0f mg", $0) } ?? "–")
                 metric("Alcohol", value: entry.alcoholG.map { String(format: "%.0f g", $0) } ?? "–")
             }
@@ -420,8 +422,9 @@ struct FoodDetailView: View {
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.45))
             }
-            if [entry.caloriesKcal, entry.proteinG, entry.carbsG, entry.fatG,
-                entry.saturatedFatG, entry.sodiumMg, entry.caffeineMg, entry.alcoholG]
+            if [entry.caloriesKcal, entry.proteinG, entry.carbsG, entry.fibreG,
+                entry.fatG, entry.saturatedFatG, entry.sodiumMg,
+                entry.caffeineMg, entry.alcoholG]
                 .allSatisfy({ $0 == nil }) {
                 Text("Nutrition wasn't analyzed (the model endpoint is unavailable right now). The meal is logged as-is — open it and enter values, or save it again later to retry.")
                     .font(.caption2)
@@ -492,8 +495,9 @@ struct FoodDetailView: View {
             context: contextText.isEmpty ? nil : contextText,
             source: e.source,
             // nil = "no hand edit here" → the (re)estimate / stored values win.
-            caloriesKcal: nil, proteinG: nil, carbsG: nil, fatG: nil,
-            saturatedFatG: nil, sodiumMg: nil, caffeineMg: nil, alcoholG: nil,
+            caloriesKcal: nil, proteinG: nil, carbsG: nil, fibreG: nil,
+            fatG: nil, saturatedFatG: nil, sodiumMg: nil, caffeineMg: nil,
+            alcoholG: nil,
             citations: e.citations ?? [],
             portionMultiplier: portion
         )

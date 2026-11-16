@@ -123,6 +123,7 @@ final class NutritionPromptParseTests: XCTestCase {
             assertClose(g.caloriesKcal, expect["caloriesKcal"], ctx + " caloriesKcal")
             assertClose(g.proteinG, expect["proteinG"], ctx + " proteinG")
             assertClose(g.carbsG, expect["carbsG"], ctx + " carbsG")
+            assertClose(g.fibreG, expect["fibreG"], ctx + " fibreG")
             assertClose(g.fatG, expect["fatG"], ctx + " fatG")
             assertClose(g.saturatedFatG, expect["saturatedFatG"], ctx + " saturatedFatG")
             assertClose(g.sodiumMg, expect["sodiumMg"], ctx + " sodiumMg")

@@ -65,6 +65,7 @@ struct FoodLogSheet: View {
     @State private var kcalText = ""
     @State private var proteinText = ""
     @State private var carbsText = ""
+    @State private var fibreText = ""
     @State private var fatText = ""
     @State private var satFatText = ""
     @State private var sodiumText = ""
@@ -75,7 +76,7 @@ struct FoodLogSheet: View {
     /// not a hand edit — it is passed as nil so the analysis/estimate keeps
     /// ownership of it. (Re-saving an untouched entry must round-trip the
     /// stored values exactly, including the portion scaling.)
-    @State private var rowOrigins = [String](repeating: "", count: 8)
+    @State private var rowOrigins = [String](repeating: "", count: 9)
 
     // Estimate results (informational — filling happens on save)
     @State private var modelDescription = ""
@@ -94,8 +95,8 @@ struct FoodLogSheet: View {
     private var hasAnyData: Bool {
         if !descriptionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
         if !photos.isEmpty { return true }
-        let rows = [kcalText, proteinText, carbsText, fatText, satFatText,
-                    sodiumText, caffeineText, alcoholText]
+        let rows = [kcalText, proteinText, carbsText, fibreText, fatText,
+                    satFatText, sodiumText, caffeineText, alcoholText]
         return rows.contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
     }
 
@@ -145,6 +146,7 @@ struct FoodLogSheet: View {
                     nutrientRow("Calories", "kcal", $kcalText)
                     nutrientRow("Protein", "g", $proteinText)
                     nutrientRow("Carbs", "g", $carbsText)
+                    nutrientRow("Fibre", "g", $fibreText)
                     nutrientRow("Fat", "g", $fatText)
                     nutrientRow("Saturated fat", "g", $satFatText)
                     nutrientRow("Sodium", "mg", $sodiumText)
@@ -407,11 +409,12 @@ struct FoodLogSheet: View {
             caloriesKcal: rowValue(kcalText, origin: rowOrigins[0]),
             proteinG: rowValue(proteinText, origin: rowOrigins[1]),
             carbsG: rowValue(carbsText, origin: rowOrigins[2]),
-            fatG: rowValue(fatText, origin: rowOrigins[3]),
-            saturatedFatG: rowValue(satFatText, origin: rowOrigins[4]),
-            sodiumMg: rowValue(sodiumText, origin: rowOrigins[5]),
-            caffeineMg: rowValue(caffeineText, origin: rowOrigins[6]),
-            alcoholG: rowValue(alcoholText, origin: rowOrigins[7]),
+            fibreG: rowValue(fibreText, origin: rowOrigins[3]),
+            fatG: rowValue(fatText, origin: rowOrigins[4]),
+            saturatedFatG: rowValue(satFatText, origin: rowOrigins[5]),
+            sodiumMg: rowValue(sodiumText, origin: rowOrigins[6]),
+            caffeineMg: rowValue(caffeineText, origin: rowOrigins[7]),
+            alcoholG: rowValue(alcoholText, origin: rowOrigins[8]),
             citations: citations,
             portionMultiplier: portion,
             date: mealDate
@@ -428,8 +431,9 @@ struct FoodLogSheet: View {
         // BLANK values. Keep the sheet open so the user can fill the rows in
         // by hand right now — a re-save with the description unchanged will
         // not re-run the analysis, so the hand-entered values stick.
-        let noValues = [saved.caloriesKcal, saved.proteinG, saved.carbsG, saved.fatG,
-                        saved.saturatedFatG, saved.sodiumMg, saved.caffeineMg, saved.alcoholG]
+        let noValues = [saved.caloriesKcal, saved.proteinG, saved.carbsG,
+                        saved.fibreG, saved.fatG, saved.saturatedFatG,
+                        saved.sodiumMg, saved.caffeineMg, saved.alcoholG]
             .allSatisfy { $0 == nil }
         if noValues && !photosToSend.isEmpty {
             errorMessage = "Saved — but the model couldn't analyze this photo. Enter the values below to fill it in."
@@ -504,14 +508,16 @@ struct FoodLogSheet: View {
             kcalText = number(f(e.caloriesKcal))
             proteinText = number(f(e.proteinG))
             carbsText = number(f(e.carbsG))
+            fibreText = number(f(e.fibreG))
             fatText = number(f(e.fatG))
             satFatText = number(f(e.saturatedFatG))
             sodiumText = number(f(e.sodiumMg))
             caffeineText = number(f(e.caffeineMg))
             alcoholText = number(f(e.alcoholG))
             // Remember what "untouched" looks like, per row.
-            rowOrigins = [kcalText, proteinText, carbsText, fatText,
-                          satFatText, sodiumText, caffeineText, alcoholText]
+            rowOrigins = [kcalText, proteinText, carbsText, fibreText,
+                          fatText, satFatText, sodiumText, caffeineText,
+                          alcoholText]
             citations = e.citations ?? []
             if e.source == .photo {
                 photos = model.store.photoData(for: e)

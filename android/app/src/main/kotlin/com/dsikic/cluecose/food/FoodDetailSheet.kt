@@ -128,8 +128,9 @@ fun FoodDetailSheet(
     var displayValues by remember {
         mutableStateOf(
             DisplayValues(
-                stored.caloriesKcal, stored.proteinG, stored.carbsG, stored.fatG,
-                stored.saturatedFatG, stored.sodiumMg, stored.caffeineMg, stored.alcoholG,
+                stored.caloriesKcal, stored.proteinG, stored.carbsG, stored.fibreG,
+                stored.fatG, stored.saturatedFatG, stored.sodiumMg,
+                stored.caffeineMg, stored.alcoholG,
             ),
         )
     }
@@ -143,6 +144,7 @@ fun FoodDetailSheet(
             caloriesKcal = f(entry.caloriesKcal),
             proteinG = f(entry.proteinG),
             carbsG = f(entry.carbsG),
+            fibreG = f(entry.fibreG),
             fatG = f(entry.fatG),
             saturatedFatG = f(entry.saturatedFatG),
             sodiumMg = f(entry.sodiumMg),
@@ -155,8 +157,9 @@ fun FoodDetailSheet(
     LaunchedEffect(stored.portionMultiplier) {
         displayPortion = if (stored.portionMultiplier == 0.0) 1.0 else stored.portionMultiplier
         displayValues = DisplayValues(
-            stored.caloriesKcal, stored.proteinG, stored.carbsG, stored.fatG,
-            stored.saturatedFatG, stored.sodiumMg, stored.caffeineMg, stored.alcoholG,
+            stored.caloriesKcal, stored.proteinG, stored.carbsG, stored.fibreG,
+            stored.fatG, stored.saturatedFatG, stored.sodiumMg,
+            stored.caffeineMg, stored.alcoholG,
         )
     }
 
@@ -199,8 +202,9 @@ fun FoodDetailSheet(
                 serving = servingText.takeIf { it.isNotBlank() },
                 context = contextText.takeIf { it.isNotBlank() },
                 source = current.source,
-                caloriesKcal = null, proteinG = null, carbsG = null, fatG = null,
-                saturatedFatG = null, sodiumMg = null, caffeineMg = null, alcoholG = null,
+                caloriesKcal = null, proteinG = null, carbsG = null, fibreG = null,
+                fatG = null, saturatedFatG = null, sodiumMg = null, caffeineMg = null,
+                alcoholG = null,
                 citations = current.citations.orEmpty(),
                 portionMultiplier = portion,
                 dateEpochSeconds = current.dateEpochSeconds,
@@ -332,13 +336,14 @@ fun FoodDetailSheet(
                         )
                         MetricRow(
                             listOf(
+                                "Fibre" to (displayValues.fibreG?.let { String.format(Locale.US, "%.0f g", it) } ?: "–"),
                                 "Fat" to (displayValues.fatG?.let { String.format(Locale.US, "%.0f g", it) } ?: "–"),
                                 "Sat fat" to (displayValues.saturatedFatG?.let { String.format(Locale.US, "%.0f g", it) } ?: "–"),
-                                "Sodium" to (displayValues.sodiumMg?.let { String.format(Locale.US, "%.0f mg", it) } ?: "–"),
                             ),
                         )
                         MetricRow(
                             listOf(
+                                "Sodium" to (displayValues.sodiumMg?.let { String.format(Locale.US, "%.0f mg", it) } ?: "–"),
                                 "Caffeine" to (displayValues.caffeineMg?.let { String.format(Locale.US, "%.0f mg", it) } ?: "–"),
                                 "Alcohol" to (displayValues.alcoholG?.let { String.format(Locale.US, "%.0f g", it) } ?: "–"),
                             ),
@@ -351,8 +356,9 @@ fun FoodDetailSheet(
                             )
                         }
                         if (listOf(
-                                stored.caloriesKcal, stored.proteinG, stored.carbsG, stored.fatG,
-                                stored.saturatedFatG, stored.sodiumMg, stored.caffeineMg, stored.alcoholG,
+                                stored.caloriesKcal, stored.proteinG, stored.carbsG,
+                                stored.fibreG, stored.fatG, stored.saturatedFatG,
+                                stored.sodiumMg, stored.caffeineMg, stored.alcoholG,
                             ).all { it == null }) {
                             Text(
                                 text = "Nutrition wasn't analyzed (the model endpoint is unavailable right now). The meal is logged as-is — open it and enter values, or save it again later to retry.",
@@ -405,6 +411,7 @@ private data class DisplayValues(
     val caloriesKcal: Double?,
     val proteinG: Double?,
     val carbsG: Double?,
+    val fibreG: Double?,
     val fatG: Double?,
     val saturatedFatG: Double?,
     val sodiumMg: Double?,
@@ -579,10 +586,9 @@ private fun NoWindowDataState(entry: FoodEntry) {
     }
 }
 
-/** The 3 h window has fully elapsed and the analysis ran on real data in
- * the window but found nothing worth flagging: the result is final — no
- * insight will ever appear for this meal. A terminal state, not "waiting".
- * (iOS `settledState`.) */
+/** The 3 h window has fully elapsed and the analysis ran (or the data was
+ * too sparse to judge): the result is final — no insight will ever appear
+ * for this meal. A terminal state, not "waiting". (iOS `settledState`.) */
 @Composable
 private fun SettledState() {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -125,6 +125,7 @@ fun FoodLogSheet(
     val initKcal = number(existing?.caloriesKcal?.let { it / initPortion })
     val initProtein = number(existing?.proteinG?.let { it / initPortion })
     val initCarbs = number(existing?.carbsG?.let { it / initPortion })
+    val initFibre = number(existing?.fibreG?.let { it / initPortion })
     val initFat = number(existing?.fatG?.let { it / initPortion })
     val initSatFat = number(existing?.saturatedFatG?.let { it / initPortion })
     val initSodium = number(existing?.sodiumMg?.let { it / initPortion })
@@ -133,6 +134,7 @@ fun FoodLogSheet(
     var kcalText by remember { mutableStateOf(initKcal) }
     var proteinText by remember { mutableStateOf(initProtein) }
     var carbsText by remember { mutableStateOf(initCarbs) }
+    var fibreText by remember { mutableStateOf(initFibre) }
     var fatText by remember { mutableStateOf(initFat) }
     var satFatText by remember { mutableStateOf(initSatFat) }
     var sodiumText by remember { mutableStateOf(initSodium) }
@@ -142,7 +144,7 @@ fun FoodLogSheet(
     // a hand-edit — the analyzed/stored value owns it). (iOS `rowOrigins`.)
     var rowOrigins by remember {
         mutableStateOf(
-            listOf(initKcal, initProtein, initCarbs, initFat, initSatFat, initSodium, initCaffeine, initAlcohol),
+            listOf(initKcal, initProtein, initCarbs, initFibre, initFat, initSatFat, initSodium, initCaffeine, initAlcohol),
         )
     }
     var isSaving by remember { mutableStateOf(false) }
@@ -207,11 +209,12 @@ fun FoodLogSheet(
             caloriesKcal = rowValue(kcalText, origin = rowOrigins[0]),
             proteinG = rowValue(proteinText, origin = rowOrigins[1]),
             carbsG = rowValue(carbsText, origin = rowOrigins[2]),
-            fatG = rowValue(fatText, origin = rowOrigins[3]),
-            saturatedFatG = rowValue(satFatText, origin = rowOrigins[4]),
-            sodiumMg = rowValue(sodiumText, origin = rowOrigins[5]),
-            caffeineMg = rowValue(caffeineText, origin = rowOrigins[6]),
-            alcoholG = rowValue(alcoholText, origin = rowOrigins[7]),
+            fibreG = rowValue(fibreText, origin = rowOrigins[3]),
+            fatG = rowValue(fatText, origin = rowOrigins[4]),
+            saturatedFatG = rowValue(satFatText, origin = rowOrigins[5]),
+            sodiumMg = rowValue(sodiumText, origin = rowOrigins[6]),
+            caffeineMg = rowValue(caffeineText, origin = rowOrigins[7]),
+            alcoholG = rowValue(alcoholText, origin = rowOrigins[8]),
             citations = citations,
             portionMultiplier = portion,
             dateEpochSeconds = mealDateMs / 1000.0,
@@ -227,8 +230,9 @@ fun FoodLogSheet(
         // BLANK values. Keep the sheet open so the user can fill the rows in
         // by hand right now.
         val noValues = listOf(
-            saved.caloriesKcal, saved.proteinG, saved.carbsG, saved.fatG,
-            saved.saturatedFatG, saved.sodiumMg, saved.caffeineMg, saved.alcoholG,
+            saved.caloriesKcal, saved.proteinG, saved.carbsG, saved.fibreG,
+            saved.fatG, saved.saturatedFatG, saved.sodiumMg, saved.caffeineMg,
+            saved.alcoholG,
         ).all { it == null }
         if (noValues && photosToSend.isNotEmpty()) {
             errorMessage = "Saved — but the model couldn't analyze this photo. Enter the values below to fill it in."
@@ -409,6 +413,7 @@ fun FoodLogSheet(
                                     kcalText = number(est.caloriesKcal)
                                     proteinText = number(est.proteinG)
                                     carbsText = number(est.carbsG)
+                                    fibreText = number(est.fibreG)
                                     fatText = number(est.fatG)
                                     satFatText = number(est.saturatedFatG)
                                     sodiumText = number(est.sodiumMg)
@@ -423,7 +428,7 @@ fun FoodLogSheet(
                                     // hand edit — refresh "untouched" so an
                                     // unchanged save lets the (re)analysis on
                                     // Save own them, exactly like iOS.
-                                    rowOrigins = listOf(kcalText, proteinText, carbsText, fatText, satFatText, sodiumText, caffeineText, alcoholText)
+                                    rowOrigins = listOf(kcalText, proteinText, carbsText, fibreText, fatText, satFatText, sodiumText, caffeineText, alcoholText)
                                 } catch (e: Exception) {
                                     errorMessage = e.message
                                 }
@@ -446,6 +451,7 @@ fun FoodLogSheet(
                     NutrientField("Calories", "kcal", kcalText) { kcalText = it }
                     NutrientField("Protein", "g", proteinText) { proteinText = it }
                     NutrientField("Carbs", "g", carbsText) { carbsText = it }
+                    NutrientField("Fibre", "g", fibreText) { fibreText = it }
                     NutrientField("Fat", "g", fatText) { fatText = it }
                     NutrientField("Saturated fat", "g", satFatText) { satFatText = it }
                     NutrientField("Sodium", "mg", sodiumText) { sodiumText = it }

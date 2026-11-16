@@ -134,8 +134,12 @@ struct FoodLogCard: View {
                     totalPill("Na", value: t.sodiumMg, unit: "mg")
                     totalPill("Caf", value: t.caffeineMg, unit: "mg")
                 }
-                // Secondary line: alcohol + saturated fat.
+                // Secondary line: fibre, alcohol + saturated fat (only when
+                // present — the main line stays fixed-width).
                 HStack(spacing: 10) {
+                    if let fib = t.fibreG, fib > 0 {
+                        totalPill("Fib", value: fib, unit: "g")
+                    }
                     if let alc = t.alcoholG, alc > 0 {
                         totalPill("Alc", value: alc, unit: "g")
                     }

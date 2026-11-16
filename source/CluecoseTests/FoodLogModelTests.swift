@@ -76,7 +76,7 @@ final class FoodLogModelTests: XCTestCase {
     private var stub: StubEstimator!
     /// The stub's canned estimate: a full-portion baseline (400 kcal etc.).
     private let base = NutritionPrompt.Estimate(
-        caloriesKcal: 400, proteinG: 30, carbsG: 40, fatG: 16,
+        caloriesKcal: 400, proteinG: 30, carbsG: 40, fibreG: 10, fatG: 16,
         saturatedFatG: 5, sodiumMg: 600, caffeineMg: 0, alcoholG: 0,
         description: nil, citations: [])
 
@@ -122,6 +122,7 @@ final class FoodLogModelTests: XCTestCase {
         XCTAssertEqual(model.entries.count, 1)
         XCTAssertEqual(saved.caloriesKcal, 400)
         XCTAssertEqual(saved.carbsG, 40)
+        XCTAssertEqual(saved.fibreG, 10)
         XCTAssertTrue(saved.isEstimated)
         XCTAssertEqual(stub.calls, 1)
     }
@@ -156,6 +157,7 @@ final class FoodLogModelTests: XCTestCase {
         XCTAssertEqual(saved.carbsG, nil, "no fabricated carbs")
         XCTAssertEqual(saved.proteinG, nil, "no fabricated protein")
         XCTAssertEqual(saved.fatG, nil, "no fabricated fat")
+        XCTAssertEqual(saved.fibreG, nil, "no fabricated fibre")
         XCTAssertFalse(saved.isEstimated, "a failed analysis is not an estimate")
         XCTAssertEqual(saved.description, "2 teaspoons of metamucil with stevia and zero sugar")
     }
@@ -179,6 +181,7 @@ final class FoodLogModelTests: XCTestCase {
         let saved = await model.saveEntry(existing: nil, values: values, photos: [])
         XCTAssertEqual(saved.caloriesKcal, 800)
         XCTAssertEqual(saved.carbsG, 80)
+        XCTAssertEqual(saved.fibreG, 20)
         XCTAssertEqual(saved.proteinG, 60)
     }
 
@@ -281,6 +284,42 @@ final class FoodLogModelTests: XCTestCase {
         XCTAssertEqual(second.caloriesKcal, 1998, "hand value (full portion) × 2")
         // Untouched rows (nil) follow the whole-meal rescale: 40 g × 2.
         XCTAssertEqual(second.carbsG, 80)
+    }
+
+    /// Fibre behaves like every other nutrient: the estimate fills it, a
+    /// hand-entered row overrides it, and a portion change rescales it.
+    func testFibreEstimateOverrideAndRescale() async {
+        let first = await model.saveEntry(existing: nil,
+                                          values: FoodLogModel.MealValues(description: "oatmeal"),
+                                          photos: [])
+        XCTAssertEqual(first.fibreG, 10, "estimate fills the fibre row")
+
+        let stored = model.entries[0]
+        var edit = FoodLogModel.MealValues(description: "oatmeal",
+                                           source: stored.source,
+                                           portionMultiplier: 2.0)
+        edit.fibreG = 12 // hand edit of the FULL portion's fibre
+        let second = await model.saveEntry(existing: stored, values: edit, photos: [])
+        XCTAssertEqual(second.fibreG, 24, "hand value (full portion) × 2")
+        // Untouched rows follow the whole-meal rescale: 400 × 2.
+        XCTAssertEqual(second.caloriesKcal, 800)
+    }
+
+    /// Fibre participates in the nil-aware daily totals, and a meal with ONLY
+    /// a fibre row is savable data (the gate's hasRows branch). The estimate
+    /// still runs (the row-only meal gets the default "Meal" description), but
+    /// the hand-entered fibre overrides its value.
+    func testFibreInTotalsAndGate() async {
+        var onlyFibre = FoodLogModel.MealValues() // no description: rows only
+        onlyFibre.fibreG = 8
+        let saved = await model.saveEntry(existing: nil, values: onlyFibre, photos: [])
+        XCTAssertEqual(saved.fibreG, 8, "hand-entered fibre beats the estimate")
+        XCTAssertEqual(saved.caloriesKcal, 400, "the estimate fills the other rows")
+        XCTAssertEqual(stub.calls, 1)
+
+        let totals = FoodTotals.sum(model.entries)
+        XCTAssertEqual(totals.fibreG, 8)
+        XCTAssertEqual(totals.entryCount, 1)
     }
 
     /// Changing the description re-runs the estimate; the fresh estimate

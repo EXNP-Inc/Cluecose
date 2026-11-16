@@ -176,6 +176,7 @@ class NutritionPromptParseTests {
                 assertClose(got.caloriesKcal, expect["caloriesKcal"], ctx + " caloriesKcal")
                 assertClose(got.proteinG, expect["proteinG"], ctx + " proteinG")
                 assertClose(got.carbsG, expect["carbsG"], ctx + " carbsG")
+                assertClose(got.fibreG, expect["fibreG"], ctx + " fibreG")
                 assertClose(got.fatG, expect["fatG"], ctx + " fatG")
                 assertClose(got.saturatedFatG, expect["saturatedFatG"], ctx + " saturatedFatG")
                 assertClose(got.sodiumMg, expect["sodiumMg"], ctx + " sodiumMg")
