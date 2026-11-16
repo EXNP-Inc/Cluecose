@@ -75,17 +75,32 @@ data class FoodUiState(
  *  • [Ready]   — the insight has been computed and is on the entry.
  *  • [Pending] — the post-meal window hasn't fully elapsed yet: the curve is
  *    still forming, and the analysis will run at [Pending.readyAtMs].
- *  • [Settled] — the window has fully elapsed and the engine ran (or found
- *    the curve flat / the data too sparse to judge): no insight will ever
- *    appear for this meal. Terminal, not "waiting".
+ *  • [Settled] — the window has fully elapsed and the engine ran (the curve
+ *    was flat or too sparse to judge): no insight will ever appear for this
+ *    meal. Terminal, not "waiting".
  *  • [NoData]  — the app has no glucose series at all, so nothing can be
  *    analyzed yet.
+ *  • [NoWindowData] — a series exists but NOTHING falls inside this meal's
+ *    analysis window (30 min before → 3 h after): the meal was logged before
+ *    the sensor started, across a gap, or into an era with no readings. The
+ *    analysis cannot run and never will. Terminal — distinct from [Settled]
+ *    (which had data in the window).
  */
 sealed interface MealAnalytics {
     object Ready : MealAnalytics
     data class Pending(val readyAtMs: Long, val remainingMin: Int) : MealAnalytics
     object Settled : MealAnalytics
     object NoData : MealAnalytics
+    /**
+     * There IS a glucose series, but none of it falls inside this meal's
+     * analysis window (the 30 min before through the 3 h after): the engine
+     * has nothing to compare against, so the analysis can never run. Typical
+     * for after-the-fact entries logged before the sensor started, across an
+     * app gap, or into a pre-pairing era. A terminal "no data in window"
+     * result — NOT a flat-curve "no notable response" result.
+     * (iOS `MealAnalytics.noWindowData`.)
+     */
+    object NoWindowData : MealAnalytics
 
     /** True while the insight is still being awaited. */
     val isPending: Boolean
@@ -96,11 +111,18 @@ sealed interface MealAnalytics {
  * The pure analytics-state decision (kept static so it is unit-testable
  * without a model) — the Android twin of iOS `analyticsState`.
  *
+ * @param hasWindowSamples whether ANY sample of the series falls inside this
+ *        meal's analysis window (baseline start → post-window end). When
+ *        [hasSamples] is true but this is false, the result is
+ *        [MealAnalytics.NoWindowData] — the analysis cannot run and never
+ *        will, which the UI must distinguish from [MealAnalytics.Settled]
+ *        ("it ran and found nothing notable").
  * @param windowMin the post-meal window in minutes (the engine's default, 180).
  */
 fun analyticsState(
     insight: com.dsikic.cluecose.core.food.MealInsight?,
     hasSamples: Boolean,
+    hasWindowSamples: Boolean,
     mealDateEpochSeconds: Double,
     nowEpochSeconds: Double,
     windowMin: Double = InsightConfig.DEFAULT.postWindowMin,
@@ -109,14 +131,19 @@ fun analyticsState(
     if (!hasSamples) return MealAnalytics.NoData
     val readyAtEpoch = mealDateEpochSeconds + windowMin * 60
     val remaining = readyAtEpoch - nowEpochSeconds
-    return if (remaining > 0) {
-        MealAnalytics.Pending(
+    if (remaining > 0) {
+        // The window is still open: readings are still arriving, so an
+        // empty-so-far window is NOT yet "no data" — it is pending.
+        return MealAnalytics.Pending(
             readyAtMs = (readyAtEpoch * 1000).toLong(),
             remainingMin = Math.ceil(remaining / 60).toInt(),
         )
-    } else {
-        MealAnalytics.Settled
     }
+    // The window is closed. No sample ever fell inside it (a meal logged
+    // before the sensor started / across a gap): the analysis cannot run —
+    // terminal "no data in window", not a flat "no notable response".
+    if (!hasWindowSamples) return MealAnalytics.NoWindowData
+    return MealAnalytics.Settled
 }
 
 /**
@@ -196,13 +223,25 @@ class FoodViewModel
     /**
      * The analytics state for [entry] right now (iOS `analytics(for:)`).
      * [hasSamples] reads the live series through the injected provider —
-     * the same seam the insight recompute uses.
+     * the same seam the insight recompute uses. [hasWindowSamples] narrows
+     * it to the meal's own analysis window (30 min before → 3 h after), so
+     * a meal logged before the sensor started (or across an app gap)
+     * reports "no data in this window" instead of the misleading
+     * "no notable response".
      */
     fun analytics(entry: FoodEntry, nowEpochSeconds: Double = System.currentTimeMillis() / 1000.0): MealAnalytics {
-        val hasSamples = (sampleProvider?.currentSamples().orEmpty()).isNotEmpty()
+        val samples = sampleProvider?.currentSamples().orEmpty()
+        val hasSamples = samples.isNotEmpty()
+        val config = InsightConfig.DEFAULT
+        val winLo = entry.dateEpochSeconds - config.baselineWindowMin * 60
+        val winHi = entry.dateEpochSeconds + config.postWindowMin * 60
+        val hasWindowSamples = samples.any {
+            it.dateMs / 1000.0 in winLo..winHi
+        }
         return analyticsState(
             insight = entry.insight,
             hasSamples = hasSamples,
+            hasWindowSamples = hasWindowSamples,
             mealDateEpochSeconds = entry.dateEpochSeconds,
             nowEpochSeconds = nowEpochSeconds,
         )

@@ -281,6 +281,7 @@ fun FoodDetailSheet(
                         } else when (a) {
                             is MealAnalytics.Pending -> CollectingState(a, stored)
                             is MealAnalytics.NoData -> NoDataState()
+                            is MealAnalytics.NoWindowData -> NoWindowDataState(stored)
                             else -> SettledState()
                         }
                     }
@@ -551,9 +552,37 @@ private fun NoDataState() {
     }
 }
 
-/** The 3 h window has fully elapsed and the analysis ran (or the data was
- * too sparse to judge): the result is final — no insight will ever appear
- * for this meal. A terminal state, not "waiting". (iOS `settledState`.) */
+/** There IS a glucose series, but none of it falls inside this meal's
+ * analysis window (30 min before → 3 h after) — a meal logged before the
+ * sensor started, across an app gap, or into an era with no readings. The
+ * analysis cannot run and never will; this is distinct from [SettledState]
+ * (the window had data and was flat). (iOS `noWindowDataState`.) */
+@Composable
+private fun NoWindowDataState(entry: FoodEntry) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(
+                imageVector = Icons.Filled.HourglassEmpty,
+                contentDescription = null,
+                tint = CluecoseColors.white(0.5f),
+                modifier = Modifier.size(14.dp),
+            )
+            Text("No glucose data in this meal's window", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color.White)
+        }
+        val mealLabel = SimpleDateFormat("EEE, MMM d · h:mm a", Locale.US)
+            .format(Date(entry.dateEpochSeconds.toLong() * 1000L))
+        Text(
+            text = "This meal was logged for $mealLabel, and no glucose readings exist between 30 minutes before it and 3 hours after it (the analysis window). The sensor wasn't streaming then — it started later, or the data isn't available on this device — so this meal's blood-sugar response can't be analyzed. Meals logged from now on get analyzed automatically once their 3-hour window closes.",
+            fontSize = 11.sp,
+            color = CluecoseColors.white(0.65f),
+        )
+    }
+}
+
+/** The 3 h window has fully elapsed and the analysis ran on real data in
+ * the window but found nothing worth flagging: the result is final — no
+ * insight will ever appear for this meal. A terminal state, not "waiting".
+ * (iOS `settledState`.) */
 @Composable
 private fun SettledState() {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -567,7 +596,7 @@ private fun SettledState() {
             Text("Analysis complete — no notable response", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color.White)
         }
         Text(
-            text = "We analyzed your blood sugar for ${InsightConfigWindowMin.toInt()} minutes after this meal: no spike or dip worth flagging — it stayed within ±30 mg/dL of your pre-meal level, or there wasn't enough pre-meal data to compare against. Nothing to act on here; the analysis for this meal is complete.",
+            text = "We analyzed your blood sugar for ${InsightConfigWindowMin.toInt()} minutes after this meal: no spike or dip worth flagging — it stayed within ±30 mg/dL of your pre-meal level. Nothing to act on here; the analysis for this meal is complete.",
             fontSize = 11.sp,
             color = CluecoseColors.white(0.65f),
         )

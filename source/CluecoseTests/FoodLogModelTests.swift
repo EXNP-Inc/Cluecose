@@ -336,14 +336,17 @@ final class FoodLogModelTests: XCTestCase {
     // MARK: Analytics state
 
     /// The pure analytics decision: insight → ready; no samples → noData;
-    /// window open → pending with the right ETA; window closed → settled.
+    /// window open → pending with the right ETA (even with no window samples
+    /// yet); window closed with data → settled; window closed with no data in
+    /// the window → noWindowData (terminal, distinct from settled).
     func testAnalyticsStateTransitions() {
         let meal = Date(timeIntervalSince1970: 1_000_000)
         let window = MealInsightEngine.Config.default.postWindowMin
-        let mid = meal.addingTimeInterval(window * 30)        // 30 min in
+        let mid = meal.addingTimeInterval(30 * 60)            // 30 min in
         let closed = meal.addingTimeInterval(window * 60 + 60) // just after
 
         XCTAssertEqual(FoodLogModel.analyticsState(insight: nil, hasSamples: false,
+                                                   hasWindowSamples: false,
                                                    mealDate: meal, now: mid),
                        .noData)
         XCTAssertEqual(FoodLogModel.analyticsState(
@@ -352,19 +355,31 @@ final class FoodLogModelTests: XCTestCase {
                                         returnToBaselineMin: nil, minMgdl: 88,
                                         minDeltaMgdl: -2, per10gCarbDeltaMgdl: nil,
                                         text: "x"),
-                   hasSamples: false, mealDate: meal, now: mid),
+                   hasSamples: false, hasWindowSamples: false,
+                   mealDate: meal, now: mid),
                    .ready)
 
+        // Window still open: pending even if the series has nothing inside
+        // the window yet — readings are still arriving.
         let pending = FoodLogModel.analyticsState(insight: nil, hasSamples: true,
+                                                  hasWindowSamples: false,
                                                   mealDate: meal, now: mid)
         guard case .pending(let readyAt, let remaining) = pending else {
             return XCTFail("mid-window meal must be .pending, got \(pending)")
         }
         XCTAssertEqual(readyAt, meal.addingTimeInterval(window * 60))
-        XCTAssertEqual(remaining, 90, "120 - 30")
+        XCTAssertEqual(remaining, 150, "180 - 30")
 
+        // Window closed, data in the window → settled (flat curve).
         XCTAssertEqual(FoodLogModel.analyticsState(insight: nil, hasSamples: true,
+                                                   hasWindowSamples: true,
                                                    mealDate: meal, now: closed),
                        .settled)
+        // Window closed, NO sample ever fell inside the window → noWindowData
+        // (the backdated-meal case: the sensor never covered this meal).
+        XCTAssertEqual(FoodLogModel.analyticsState(insight: nil, hasSamples: true,
+                                                   hasWindowSamples: false,
+                                                   mealDate: meal, now: closed),
+                       .noWindowData)
     }
 }

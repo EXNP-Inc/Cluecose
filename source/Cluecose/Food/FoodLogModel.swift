@@ -129,16 +129,22 @@ final class FoodLogModel: ObservableObject {
     ///  • `.pending` — the post-meal window hasn't fully elapsed yet: the
     ///    curve is still forming, and the analysis will run (and the insight
     ///    appear) at `readyAt`, about `remainingMin` from now.
-    ///  • `.settled` — the window has fully elapsed and the engine ran (or
-    ///    found the curve flat / the data too sparse to judge): no insight
-    ///    will ever appear for this meal.
+    ///  • `.settled` — the window has fully elapsed and the engine ran (the
+    ///    curve was flat or too sparse to judge): no insight will ever
+    ///    appear for this meal.
     ///  • `.noData`  — the app has no glucose series at all (no sensor data
     ///    and not in demo mode), so nothing can be analyzed yet.
+    ///  • `.noWindowData` — a series exists but NOTHING falls inside this
+    ///    meal's analysis window (30 min before → 3 h after): the meal was
+    ///    logged before the sensor started, across a gap, or into an era
+    ///    with no readings. The analysis cannot run and never will.
+    ///    Terminal — distinct from `.settled` (which had data in the window).
     enum MealAnalytics: Equatable {
         case ready
         case pending(readyAt: Date, remainingMin: Int)
         case settled
         case noData
+        case noWindowData
 
         /// True while the insight is still being awaited (not yet computed).
         var isPending: Bool {
@@ -155,10 +161,20 @@ final class FoodLogModel: ObservableObject {
 
     /// Compute the analytics state for `entry` right now.
     func analytics(for entry: FoodEntry, now: Date = Date()) -> MealAnalytics {
-        Self.analyticsState(insight: entry.insight,
-                            hasSamples: !(glucoseModel?.allSamples ?? []).isEmpty,
-                            mealDate: entry.date,
-                            now: now)
+        let samples = glucoseModel?.allSamples ?? []
+        let config = MealInsightEngine.Config.default
+        // The meal's analysis window: 30 min before → 3 h after. Whether
+        // ANY of the series falls inside it is what separates "no data in
+        // this meal's window" (a backdated meal the sensor never saw) from
+        // "the window had data and was flat".
+        let winLo = entry.date.addingTimeInterval(-config.baselineWindowMin * 60)
+        let winHi = entry.date.addingTimeInterval(config.postWindowMin * 60)
+        let hasWindowSamples = samples.contains { $0.date >= winLo && $0.date <= winHi }
+        return Self.analyticsState(insight: entry.insight,
+                                   hasSamples: !samples.isEmpty,
+                                   hasWindowSamples: hasWindowSamples,
+                                   mealDate: entry.date,
+                                   now: now)
     }
 
     /// The pure decision (kept out of the instance so it is unit-testable
@@ -167,11 +183,17 @@ final class FoodLogModel: ObservableObject {
     ///  • insight present            → `.ready`
     ///  • no glucose series at all   → `.noData`
     ///  • window still forming       → `.pending(readyAt, remainingMin)`
-    ///  • window fully elapsed       → `.settled` (terminal: the engine is
-    ///    "final only", so once it has run the result sticks — flat or
-    ///    sparse curves yield no insight, ever)
+    ///    (even with no window samples yet — readings are still arriving)
+    ///  • window elapsed, no sample
+    ///    ever fell inside it        → `.noWindowData` (terminal: the meal
+    ///    was logged before the sensor started / across a gap; the analysis
+    ///    cannot run and never will)
+    ///  • window elapsed, data in it → `.settled` (terminal: the engine is
+    ///    "final only", so once it has run the result sticks — flat curves
+    ///    yield no insight, ever)
     static func analyticsState(insight: MealInsight?,
                                hasSamples: Bool,
+                               hasWindowSamples: Bool,
                                mealDate: Date,
                                now: Date,
                                windowMin: Double = MealInsightEngine.Config.default.postWindowMin) -> MealAnalytics {
@@ -183,6 +205,7 @@ final class FoodLogModel: ObservableObject {
             return .pending(readyAt: readyAt,
                             remainingMin: Int((remaining / 60).rounded(.up)))
         }
+        if !hasWindowSamples { return .noWindowData }
         return .settled
     }
 

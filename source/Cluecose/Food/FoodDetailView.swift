@@ -152,6 +152,8 @@ struct FoodDetailView: View {
                 collectingState(readyAt: readyAt, remainingMin: remainingMin)
             } else if case .noData = a {
                 noDataState
+            } else if case .noWindowData = a {
+                noWindowDataState
             } else {
                 settledState
             }
@@ -240,9 +242,35 @@ struct FoodDetailView: View {
         }
     }
 
-    /// The 3 h window has fully elapsed and the analysis ran (or the data
-    /// was too sparse to judge): the result is final — no insight will ever
-    /// appear for this meal. This is a terminal state, not "waiting".
+    /// There IS a glucose series, but none of it falls inside this meal's
+    /// analysis window (30 min before → 3 h after): a meal logged before the
+    /// sensor started, across an app gap, or into an era with no readings.
+    /// The analysis cannot run and never will — distinct from
+    /// `settledState` (the window had data and was flat). (Android
+    /// `NoWindowDataState`.)
+    private var noWindowDataState: some View {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE, MMM d · h:mm a"
+        let mealLabel = formatter.string(from: entry.date)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "hourglass")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.5))
+                Text("No glucose data in this meal's window")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.white)
+            }
+            Text("This meal was logged for \(mealLabel), and no glucose readings exist between 30 minutes before it and 3 hours after it (the analysis window). The sensor wasn't streaming then — it started later, or the data isn't available on this device — so this meal's blood-sugar response can't be analyzed. Meals logged from now on get analyzed automatically once their 3-hour window closes.")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.65))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// The 3 h window has fully elapsed and the analysis ran on real data in
+    /// the window but found nothing worth flagging: the result is final — no
+    /// insight will ever appear for this meal. A terminal state, not "waiting".
     private var settledState: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
@@ -253,7 +281,7 @@ struct FoodDetailView: View {
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(.white)
             }
-            Text("We analyzed your blood sugar for \(Int(FoodLogModel.postWindowMin)) minutes after this meal: no spike or dip worth flagging — it stayed within ±30 mg/dL of your pre-meal level, or there wasn't enough pre-meal data to compare against. Nothing to act on here; the analysis for this meal is complete.")
+            Text("We analyzed your blood sugar for \(Int(FoodLogModel.postWindowMin)) minutes after this meal: no spike or dip worth flagging — it stayed within ±30 mg/dL of your pre-meal level. Nothing to act on here; the analysis for this meal is complete.")
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.65))
                 .fixedSize(horizontal: false, vertical: true)
